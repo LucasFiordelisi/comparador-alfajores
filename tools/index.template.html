@@ -7,32 +7,25 @@
 <title>Comparador de Alfajores</title>
 <style>
 :root {
-  --bg: #f7f3ee;
-  --bg-card: #ffffff;
-  --text: #2b2118;
-  --text-muted: #6f6255;
-  --border: #e3d9cc;
-  --accent: #8b5e34;
-  --track: #ece3d7;
-  --shadow: 0 1px 3px rgba(60, 40, 20, 0.08), 0 4px 16px rgba(60, 40, 20, 0.06);
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #1a1512;
-    --bg-card: #241d18;
-    --text: #f0e6da;
-    --text-muted: #b3a595;
-    --border: #3a2f26;
-    --accent: #c99a6a;
-    --track: #35291f;
-    --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.3);
-  }
+  --bg: #0e0c0a;
+  --bg-2: #17120e;
+  --bg-card: rgba(34, 27, 21, 0.72);
+  --text: #f3ebe1;
+  --text-muted: #a89a8a;
+  --border: rgba(255, 255, 255, 0.08);
+  --accent: #d2a374;
+  --track: rgba(255, 255, 255, 0.09);
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.3);
 }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
 body {
-  background: var(--bg);
+  background:
+    radial-gradient(90rem 60rem at 110% -10%, rgba(210, 163, 116, 0.10), transparent 60%),
+    radial-gradient(70rem 50rem at -20% 110%, rgba(120, 82, 52, 0.14), transparent 60%),
+    linear-gradient(180deg, var(--bg-2), var(--bg) 40%);
+  background-attachment: fixed;
   color: var(--text);
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   line-height: 1.5;
@@ -40,16 +33,26 @@ body {
 }
 .wrap { max-width: 72rem; margin: 0 auto; }
 
-header h1 { font-size: clamp(1.4rem, 4vw, 2rem); margin: 0 0 0.2rem; }
+header h1 {
+  font-size: clamp(1.4rem, 4vw, 2rem);
+  margin: 0 0 0.2rem;
+  background: linear-gradient(120deg, var(--text) 30%, var(--accent));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
 header p { margin: 0 0 1.2rem; color: var(--text-muted); }
 
 h2 { font-size: 1rem; margin: 0 0 0.75rem; }
 .card {
   background: var(--bg-card);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   border: 1px solid var(--border);
-  border-radius: 0.75rem;
+  border-radius: 1.1rem;
   box-shadow: var(--shadow);
-  padding: 1rem;
+  padding: 1.1rem;
 }
 
 /* --- 3D + KPI --- */
@@ -69,6 +72,8 @@ h2 { font-size: 1rem; margin: 0 0 0.75rem; }
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  background: radial-gradient(60% 55% at 50% 42%, rgba(210, 163, 116, 0.10), transparent 70%);
+  border-radius: 0.6rem;
 }
 .stage canvas { display: block; width: 100%; height: 100%; position: absolute; inset: 0; }
 .stage .fallback {
@@ -96,11 +101,12 @@ h2 { font-size: 1rem; margin: 0 0 0.75rem; }
 select {
   font: inherit;
   color: var(--text);
-  background: var(--bg);
+  background: rgba(255, 255, 255, 0.06);
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
+  border-radius: 0.6rem;
   padding: 0.5rem 0.6rem;
 }
+select option { background: var(--bg-2); color: var(--text); }
 
 /* --- selector de marcas --- */
 .controls { margin-bottom: 1rem; }
@@ -113,13 +119,14 @@ button {
   font: inherit;
   font-size: 0.85rem;
   padding: 0.4rem 0.8rem;
-  border-radius: 0.5rem;
+  border-radius: 0.6rem;
   border: 1px solid var(--border);
-  background: var(--bg);
+  background: rgba(255, 255, 255, 0.06);
   color: var(--text);
   cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
-button:hover { border-color: var(--accent); }
+button:hover { border-color: var(--accent); background: rgba(210, 163, 116, 0.12); }
 button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* --- gráficos --- */
@@ -524,8 +531,13 @@ function initAlfajor() {
   rim.position.set(-4, 2, -3);
   scene.add(rim);
 
+  // pivot tilts the whole model so the top (logo) faces the camera;
+  // the inner group spins on its own axis without wobbling.
+  const pivot = new THREE.Group();
+  pivot.rotation.x = 0.38;
+  scene.add(pivot);
   const group = new THREE.Group();
-  scene.add(group);
+  pivot.add(group);
 
   const p = featuredProduct();
   // renderer.outputEncoding = sRGB requires colors in linear space
