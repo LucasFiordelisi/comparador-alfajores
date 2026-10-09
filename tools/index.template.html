@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Comparador de Alfajores</title>
+<style>
+:root {
+  --bg: #f7f3ee;
+  --bg-card: #ffffff;
+  --text: #2b2118;
+  --text-muted: #6f6255;
+  --border: #e3d9cc;
+  --accent: #8b5e34;
+  --track: #ece3d7;
+  --shadow: 0 1px 3px rgba(60, 40, 20, 0.08), 0 4px 16px rgba(60, 40, 20, 0.06);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1a1512;
+    --bg-card: #241d18;
+    --text: #f0e6da;
+    --text-muted: #b3a595;
+    --border: #3a2f26;
+    --accent: #c99a6a;
+    --track: #35291f;
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.3);
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.5;
+  padding: 1rem;
+}
+.wrap { max-width: 72rem; margin: 0 auto; }
+
+header h1 { font-size: clamp(1.4rem, 4vw, 2rem); margin: 0 0 0.2rem; }
+header p { margin: 0 0 1.2rem; color: var(--text-muted); }
+
+h2 { font-size: 1rem; margin: 0 0 0.75rem; }
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  box-shadow: var(--shadow);
+  padding: 1rem;
+}
+
+/* --- 3D + KPI --- */
+.feature {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+@media (min-width: 640px) {
+  .feature { grid-template-columns: 1.2fr 1fr; }
+}
+.stage {
+  position: relative;
+  min-height: 300px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.stage canvas { display: block; width: 100%; height: 100%; position: absolute; inset: 0; }
+.stage .fallback {
+  color: var(--text-muted);
+  text-align: center;
+  padding: 1rem;
+}
+
+.kpi { display: flex; flex-direction: column; gap: 0.75rem; }
+.kpi-head { display: flex; align-items: center; gap: 0.9rem; }
+.kpi-logo { width: 4.5rem; height: 4.5rem; object-fit: contain; border-radius: 0.6rem; border: 1px solid var(--border); background: #fbf7f0; flex-shrink: 0; }
+.kpi-label { margin: 0; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
+.kpi-value { margin: 0; font-size: clamp(2.4rem, 8vw, 3.4rem); font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.kpi-total { font-size: 1.1rem; font-weight: 500; color: var(--text-muted); margin-left: 0.35rem; }
+.kpi-brand { margin: 0; font-weight: 600; }
+.kpi-params { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; }
+.kpi-params li { display: grid; grid-template-columns: 1fr auto; gap: 0.2rem 0.5rem; font-size: 0.85rem; }
+.kpi-params .plabel { color: var(--text-muted); }
+.kpi-params .pval { font-weight: 600; font-variant-numeric: tabular-nums; }
+.kpi-params .track { grid-column: 1 / -1; height: 0.35rem; background: var(--track); border-radius: 999px; overflow: hidden; }
+.kpi-params .fill { height: 100%; border-radius: 999px; }
+
+.field { display: flex; flex-direction: column; gap: 0.3rem; margin-top: auto; }
+.field label { font-size: 0.85rem; color: var(--text-muted); }
+select {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.6rem;
+}
+
+/* --- selector de marcas --- */
+.controls { margin-bottom: 1rem; }
+.controls .row { display: flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; align-items: center; }
+.chip { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; cursor: pointer; padding: 0.25rem 0; }
+.chip input { accent-color: var(--accent); width: 1rem; height: 1rem; cursor: pointer; }
+.chip .dot { width: 0.7rem; height: 0.7rem; border-radius: 50%; display: inline-block; }
+.controls .actions { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
+button {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.4rem 0.8rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+}
+button:hover { border-color: var(--accent); }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* --- gráficos --- */
+.charts { display: grid; gap: 1rem; }
+.chart-card h2 { display: flex; align-items: baseline; gap: 0.5rem; }
+.chart-card h2 small { font-weight: 400; color: var(--text-muted); font-size: 0.75rem; }
+.chart-box { position: relative; height: 22rem; }
+.chart-box.tall { height: 26rem; }
+@media (min-width: 900px) {
+  .charts { grid-template-columns: 1fr 1fr; }
+  .charts .full { grid-column: 1 / -1; }
+}
+.empty-note { color: var(--text-muted); padding: 2rem 0; text-align: center; }
+[hidden] { display: none !important; }
+footer { margin: 1.5rem 0 0.5rem; color: var(--text-muted); font-size: 0.8rem; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Comparador de Alfajores</h1>
+    <p>Competencia de marcas puntuadas en 6 parámetros · puntaje final del 1 al 10</p>
+  </header>
+
+  <main>
+    <section class="feature" aria-label="Alfajor en exhibición">
+      <div class="card stage" id="stage">
+        <canvas id="alfajor-canvas" role="img" aria-label="Modelo 3D del alfajor en rotación sobre su eje"></canvas>
+        <p class="fallback" id="stage-fallback" hidden>La vista 3D no está disponible en este dispositivo.</p>
+      </div>
+      <aside class="card kpi" aria-live="polite">
+        <div class="kpi-head">
+          <img class="kpi-logo" id="kpi-logo" alt="" hidden>
+          <div>
+            <p class="kpi-label">Puntaje final</p>
+            <p class="kpi-value"><span id="kpi-score">—</span><span class="kpi-total">/10</span></p>
+          </div>
+        </div>
+        <p class="kpi-brand" id="kpi-brand">—</p>
+        <ul class="kpi-params" id="kpi-params"></ul>
+        <div class="field">
+          <label for="featured-select">Alfajor en exhibición</label>
+          <select id="featured-select"></select>
+        </div>
+      </aside>
+    </section>
+
+    <section class="card controls" aria-label="Selección de marcas">
+      <h2>Marcas en competencia</h2>
+      <div class="row" id="brand-toggles" role="group" aria-label="Seleccionar marcas a comparar"></div>
+      <div class="actions">
+        <button type="button" id="btn-all">Seleccionar todas</button>
+        <button type="button" id="btn-none">Quitar todas</button>
+      </div>
+    </section>
+
+    <section class="charts" aria-label="Gráficos comparativos">
+      <div class="card chart-card full">
+        <h2>Ranking general <small>promedio de los 6 parámetros</small></h2>
+        <div class="chart-box"><canvas id="chart-ranking" role="img" aria-label="Gráfico de barras con el ranking general de puntajes"></canvas></div>
+      </div>
+      <div class="card chart-card">
+        <h2>Perfil de sabores <small>radar por parámetro</small></h2>
+        <div class="chart-box tall"><canvas id="chart-radar" role="img" aria-label="Gráfico radar comparando los 6 parámetros de cada marca"></canvas></div>
+      </div>
+      <div class="card chart-card">
+        <h2>Detalle por parámetro <small>barras agrupadas</small></h2>
+        <div class="chart-box tall"><canvas id="chart-bars" role="img" aria-label="Barras agrupadas con el detalle de cada parámetro por marca"></canvas></div>
+      </div>
+      <p class="empty-note full" id="empty-note" hidden>No hay marcas seleccionadas. Elegí al menos una para ver los gráficos.</p>
+    </section>
+  </main>
+
+  <footer>Datos embebidos desde datos/alfajores-ejemplo.xlsx · funciona 100% offline</footer>
+</div>
+
+<script>
+/* LIB: three.js r128 | MIT | vendor/three.min.js */
+__LIB_THREE__
+</script>
+<script>
+/* LIB: Chart.js 4.4.1 | MIT | vendor/chart.umd.min.js */
+__LIB_CHART__
+</script>
+<script>
+'use strict';
+
+// ==== STATE ====
+// Embedded from datos/alfajores-ejemplo.xlsx (build: tools/build.js)
+const PRODUCTS = __DATA__;
+
+const PARAMS = [
+  { key: 'priceQuality',  label: 'Relación calidad/precio',   short: 'Calidad/precio' },
+  { key: 'dulceDeLeche',  label: 'Cantidad de dulce de leche', short: 'Dulce de leche' },
+  { key: 'chocolate',     label: 'Sabor del chocolate',       short: 'Chocolate' },
+  { key: 'tapas',         label: 'Calidad de las tapas',      short: 'Tapas' },
+  { key: 'contundencia',  label: 'Contundencia',              short: 'Contundencia' },
+  { key: 'originalidad',  label: 'Originalidad',              short: 'Originalidad' }
+];
+
+const state = {
+  selected: new Set(PRODUCTS.map((p) => p.id)),
+  featuredId: PRODUCTS.length ? PRODUCTS[0].id : null,
+  charts: { ranking: null, radar: null, bars: null },
+  alfajor: null
+};
+
+// ==== LOGIC ====
+function totalScore(p) {
+  const sum = PARAMS.reduce((acc, par) => acc + Number(p.scores[par.key] || 0), 0);
+  return sum / PARAMS.length;
+}
+
+function scoreColor(score) {
+  if (score >= 8) return '#2e9e5b';
+  if (score >= 6.5) return '#d4a017';
+  return '#c0562e';
+}
+
+function withAlpha(hex, alpha) {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return 'rgba(' + r + ', ' + g + ', ' + b + ', ' + alpha + ')';
+}
+
+function selectedProducts() {
+  return PRODUCTS.filter((p) => state.selected.has(p.id));
+}
+
+function featuredProduct() {
+  return PRODUCTS.find((p) => p.id === state.featuredId) || null;
+}
+
+function label(p) {
+  return p.brand + ' · ' + p.name;
+}
+
+// ==== UI ====
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function renderToggles() {
+  const box = document.getElementById('brand-toggles');
+  box.textContent = '';
+  PRODUCTS.forEach((p) => {
+    const chip = document.createElement('label');
+    chip.className = 'chip';
+
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = state.selected.has(p.id);
+    input.addEventListener('change', () => {
+      if (input.checked) state.selected.add(p.id);
+      else state.selected.delete(p.id);
+      renderCharts();
+    });
+
+    const dot = document.createElement('span');
+    dot.className = 'dot';
+    dot.style.background = p.color;
+
+    chip.append(input, dot, document.createTextNode(label(p)));
+    box.appendChild(chip);
+  });
+}
+
+function renderSelect() {
+  const sel = document.getElementById('featured-select');
+  sel.textContent = '';
+  PRODUCTS.forEach((p) => {
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = label(p);
+    opt.selected = p.id === state.featuredId;
+    sel.appendChild(opt);
+  });
+  sel.addEventListener('change', () => setFeatured(sel.value));
+}
+
+function setFeatured(id) {
+  state.featuredId = id;
+  const p = featuredProduct();
+  if (!p) return;
+
+  document.getElementById('kpi-score').textContent = totalScore(p).toFixed(1);
+  document.getElementById('kpi-score').style.color = scoreColor(totalScore(p));
+  document.getElementById('kpi-brand').textContent = label(p);
+
+  const logoImg = document.getElementById('kpi-logo');
+  logoImg.hidden = !p.logo;
+  if (p.logo) { logoImg.src = p.logo; logoImg.alt = 'Logo de ' + p.brand; }
+
+  const list = document.getElementById('kpi-params');
+  list.textContent = '';
+  PARAMS.forEach((par) => {
+    const val = Number(p.scores[par.key] || 0);
+    const li = document.createElement('li');
+
+    const lab = document.createElement('span');
+    lab.className = 'plabel';
+    lab.textContent = par.label;
+
+    const num = document.createElement('span');
+    num.className = 'pval';
+    num.textContent = val.toFixed(0);
+
+    const track = document.createElement('span');
+    track.className = 'track';
+    const fill = document.createElement('span');
+    fill.className = 'fill';
+    fill.style.width = (val / 10) * 100 + '%';
+    fill.style.background = p.color;
+    track.appendChild(fill);
+
+    li.append(lab, num, track);
+    list.appendChild(li);
+  });
+
+  if (state.alfajor) state.alfajor.setProduct(p);
+}
+
+function chartTheme() {
+  return {
+    text: cssVar('--text'),
+    muted: cssVar('--text-muted'),
+    grid: cssVar('--border'),
+    track: cssVar('--track')
+  };
+}
+
+function destroyCharts() {
+  Object.keys(state.charts).forEach((k) => {
+    if (state.charts[k]) { state.charts[k].destroy(); state.charts[k] = null; }
+  });
+}
+
+function renderCharts() {
+  const data = selectedProducts().slice().sort((a, b) => totalScore(b) - totalScore(a));
+  const note = document.getElementById('empty-note');
+  const hasData = data.length > 0;
+  note.hidden = hasData;
+  document.querySelectorAll('.charts .chart-card').forEach((el) => { el.hidden = !hasData; });
+  destroyCharts();
+  if (!hasData) return;
+
+  const t = chartTheme();
+  Chart.defaults.color = t.text;
+  Chart.defaults.borderColor = t.grid;
+  Chart.defaults.font.family = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+
+  // Ranking (horizontal bars)
+  state.charts.ranking = new Chart(document.getElementById('chart-ranking'), {
+    type: 'bar',
+    data: {
+      labels: data.map(label),
+      datasets: [{
+        label: 'Puntaje final',
+        data: data.map((p) => Number(totalScore(p).toFixed(2))),
+        backgroundColor: data.map((p) => p.color),
+        borderRadius: 6,
+        barPercentage: 0.75
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: (c) => c.parsed.x.toFixed(1) + ' / 10' } }
+      },
+      scales: {
+        x: { min: 0, max: 10, grid: { color: t.grid } },
+        y: { grid: { display: false } }
+      },
+      onClick: (evt, els) => {
+        if (els.length) {
+          const p = data[els[0].index];
+          document.getElementById('featured-select').value = p.id;
+          setFeatured(p.id);
+        }
+      }
+    }
+  });
+
+  // Radar (6 axes per brand)
+  state.charts.radar = new Chart(document.getElementById('chart-radar'), {
+    type: 'radar',
+    data: {
+      labels: PARAMS.map((p) => p.short),
+      datasets: data.map((p) => ({
+        label: label(p),
+        data: PARAMS.map((par) => Number(p.scores[par.key] || 0)),
+        borderColor: p.color,
+        backgroundColor: withAlpha(p.color, 0.12),
+        pointBackgroundColor: p.color,
+        pointRadius: 3,
+        borderWidth: 2
+      }))
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        r: {
+          min: 0, max: 10,
+          ticks: { stepSize: 2, color: t.muted, backdropColor: 'transparent' },
+          grid: { color: t.grid },
+          angleLines: { color: t.grid },
+          pointLabels: { color: t.text, font: { size: 11 } }
+        }
+      },
+      plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10 } } }
+    }
+  });
+
+  // Grouped bars per parameter
+  state.charts.bars = new Chart(document.getElementById('chart-bars'), {
+    type: 'bar',
+    data: {
+      labels: PARAMS.map((p) => p.short),
+      datasets: data.map((p) => ({
+        label: p.brand,
+        data: PARAMS.map((par) => Number(p.scores[par.key] || 0)),
+        backgroundColor: p.color,
+        borderRadius: 4
+      }))
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        y: { min: 0, max: 10, grid: { color: t.grid } },
+        x: { grid: { display: false } }
+      },
+      plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10 } } }
+    }
+  });
+}
+
+// ==== 3D ====
+function roundedSquareShape(size, radius) {
+  const s = size / 2;
+  const r = Math.min(radius, s);
+  const shape = new THREE.Shape();
+  shape.moveTo(-s + r, -s);
+  shape.lineTo(s - r, -s);
+  shape.quadraticCurveTo(s, -s, s, -s + r);
+  shape.lineTo(s, s - r);
+  shape.quadraticCurveTo(s, s, s - r, s);
+  shape.lineTo(-s + r, s);
+  shape.quadraticCurveTo(-s, s, -s, s - r);
+  shape.lineTo(-s, -s + r);
+  shape.quadraticCurveTo(-s, -s, -s + r, -s);
+  return shape;
+}
+
+// Extrudes the shape along +Y so it lies flat (square slab with volume).
+function squareSlab(size, radius, depth) {
+  const geo = new THREE.ExtrudeGeometry(roundedSquareShape(size, radius), {
+    depth: depth,
+    bevelEnabled: true,
+    bevelThickness: 0.05,
+    bevelSize: 0.045,
+    bevelSegments: 3,
+    curveSegments: 14
+  });
+  geo.rotateX(-Math.PI / 2);
+  return geo;
+}
+
+function initAlfajor() {
+  const canvas = document.getElementById('alfajor-canvas');
+  const stage = document.getElementById('stage');
+  const fallback = document.getElementById('stage-fallback');
+
+  let renderer;
+  try {
+    renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: true });
+  } catch (err) {
+    canvas.hidden = true;
+    fallback.hidden = false;
+    return null;
+  }
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setClearColor(0x000000, 0);
+  renderer.outputEncoding = THREE.sRGBEncoding;
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
+  camera.position.set(0, 1.8, 4.6);
+  camera.lookAt(0, 0, 0);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+  const key = new THREE.DirectionalLight(0xffffff, 0.85);
+  key.position.set(3, 5, 4);
+  scene.add(key);
+  const rim = new THREE.DirectionalLight(0xffffff, 0.35);
+  rim.position.set(-4, 2, -3);
+  scene.add(rim);
+
+  const group = new THREE.Group();
+  scene.add(group);
+
+  const p = featuredProduct();
+  // renderer.outputEncoding = sRGB requires colors in linear space
+  const srgb = (hex) => new THREE.Color(hex).convertSRGBToLinear();
+  const tapaMat = new THREE.MeshStandardMaterial({ color: srgb(p ? p.color : '#6b4423'), roughness: 0.42, metalness: 0.06 });
+  const ddlMat = new THREE.MeshStandardMaterial({ color: srgb('#b0722f'), roughness: 0.85, metalness: 0.0 });
+
+  // square alfajor: two chocolate tapas + dulce de leche filling
+  const top = new THREE.Mesh(squareSlab(1.7, 0.4, 0.34), tapaMat);
+  top.position.y = 0.25;
+  const bottom = new THREE.Mesh(squareSlab(1.7, 0.4, 0.34), tapaMat);
+  bottom.position.y = -0.59;
+  const filling = new THREE.Mesh(squareSlab(1.66, 0.38, 0.5), ddlMat);
+  filling.position.y = -0.25;
+  group.add(top, bottom, filling);
+
+  // brand logo sticker on the top face
+  const logoMesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.15, 1.15),
+    new THREE.MeshBasicMaterial({ transparent: true })
+  );
+  logoMesh.rotation.x = -Math.PI / 2;
+  logoMesh.position.y = 0.652;
+  logoMesh.visible = false;
+  group.add(logoMesh);
+
+  const loader = new THREE.TextureLoader();
+  function setLogo(url) {
+    if (!url) { logoMesh.visible = false; logoMesh.userData.url = null; return; }
+    if (logoMesh.userData.url === url) return;
+    logoMesh.userData.url = url;
+    loader.load(url, (tex) => {
+      if (logoMesh.userData.url !== url) return; // stale request
+      if (logoMesh.material.map) logoMesh.material.map.dispose();
+      tex.encoding = THREE.sRGBEncoding;
+      tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      logoMesh.material.map = tex;
+      logoMesh.material.needsUpdate = true;
+      logoMesh.visible = true;
+    });
+  }
+
+  function resize() {
+    const w = stage.clientWidth || 320;
+    const h = stage.clientHeight || 300;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
+  if (window.ResizeObserver) new ResizeObserver(resize).observe(stage);
+  window.addEventListener('resize', resize);
+  resize();
+
+  let last = performance.now();
+  function animate(now) {
+    const dt = Math.min((now - last) / 1000, 0.1);
+    last = now;
+    group.rotation.y += dt * 0.6; // gira sobre su eje vertical
+    renderer.render(scene, camera);
+    requestAnimationFrame(animate);
+  }
+  requestAnimationFrame(animate);
+
+  return {
+    setProduct(prod) {
+      tapaMat.color.set(prod.color).convertSRGBToLinear();
+      setLogo(prod.logo);
+    }
+  };
+}
+
+// ==== INIT ====
+function init() {
+  renderToggles();
+  renderSelect();
+  setFeatured(state.featuredId);
+  state.alfajor = initAlfajor();
+  const fp = featuredProduct();
+  if (state.alfajor && fp) state.alfajor.setProduct(fp);
+  renderCharts();
+
+  document.getElementById('btn-all').addEventListener('click', () => {
+    state.selected = new Set(PRODUCTS.map((p) => p.id));
+    document.querySelectorAll('#brand-toggles input').forEach((i) => { i.checked = true; });
+    renderCharts();
+  });
+  document.getElementById('btn-none').addEventListener('click', () => {
+    state.selected = new Set();
+    document.querySelectorAll('#brand-toggles input').forEach((i) => { i.checked = false; });
+    renderCharts();
+  });
+}
+
+init();
+</script>
+</body>
+</html>
