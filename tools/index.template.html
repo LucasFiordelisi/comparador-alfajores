@@ -93,6 +93,7 @@ h2 { font-size: 1rem; margin: 0 0 0.75rem; }
 .kpi-params li { display: grid; grid-template-columns: 1fr auto; gap: 0.2rem 0.5rem; font-size: 0.85rem; }
 .kpi-params .plabel { color: var(--text-muted); }
 .kpi-params .pval { font-weight: 600; font-variant-numeric: tabular-nums; }
+.kpi-params .pcount { font-size: 0.72rem; color: var(--text-muted); }
 .kpi-params .track { grid-column: 1 / -1; height: 0.35rem; background: var(--track); border-radius: 999px; overflow: hidden; }
 .kpi-params .fill { height: 100%; border-radius: 999px; }
 
@@ -141,6 +142,29 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 }
 .empty-note { color: var(--text-muted); padding: 2rem 0; text-align: center; }
 [hidden] { display: none !important; }
+
+/* --- votación --- */
+.vote-setup { display: grid; gap: 0.75rem; margin-bottom: 0.9rem; }
+@media (min-width: 640px) {
+  .vote-setup { grid-template-columns: 10rem 11rem 1fr auto; align-items: end; }
+}
+.vote-setup input[type="text"] {
+  font: inherit;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  padding: 0.5rem 0.6rem;
+  width: 100%;
+}
+.vote-setup input[type="text"]::placeholder { color: var(--text-muted); }
+.vote-progress { margin: 0; color: var(--text-muted); font-size: 0.85rem; }
+.vote-row { display: grid; grid-template-columns: 1fr 2.5rem; gap: 0.15rem 0.75rem; align-items: center; margin-bottom: 0.55rem; }
+.vote-row label { font-size: 0.9rem; }
+.vote-row input[type="range"] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
+.vote-row output { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.vote-actions { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.8rem; flex-wrap: wrap; }
+#vote-status { color: var(--accent); font-size: 0.85rem; }
 footer { margin: 1.5rem 0 0.5rem; color: var(--text-muted); font-size: 0.8rem; text-align: center; }
 </style>
 </head>
@@ -181,6 +205,33 @@ footer { margin: 1.5rem 0 0.5rem; color: var(--text-muted); font-size: 0.8rem; t
         <button type="button" id="btn-all">Seleccionar todas</button>
         <button type="button" id="btn-none">Quitar todas</button>
       </div>
+    </section>
+
+    <section class="card vote" aria-label="Tu votación">
+      <h2>Tu votación</h2>
+      <div class="vote-setup">
+        <div class="field">
+          <label for="vote-user">Sos</label>
+          <select id="vote-user"></select>
+        </div>
+        <div class="field">
+          <label for="vote-name">Tu nombre (opcional)</label>
+          <input type="text" id="vote-name" maxlength="30" placeholder="ej. María" autocomplete="nickname">
+        </div>
+        <div class="field">
+          <label for="vote-alfajor">Alfajor a votar</label>
+          <select id="vote-alfajor"></select>
+        </div>
+        <p class="vote-progress" id="vote-progress" aria-live="polite"></p>
+      </div>
+      <form id="vote-form">
+        <div id="vote-sliders"></div>
+        <div class="vote-actions">
+          <button type="submit">Guardar voto</button>
+          <button type="button" id="vote-export">Exportar votos (CSV)</button>
+          <span id="vote-status" aria-live="polite"></span>
+        </div>
+      </form>
     </section>
 
     <section class="charts" aria-label="Gráficos comparativos">
@@ -231,12 +282,60 @@ const state = {
   selected: new Set(PRODUCTS.map((p) => p.id)),
   featuredId: PRODUCTS.length ? PRODUCTS[0].id : null,
   charts: { ranking: null, radar: null, bars: null },
-  alfajor: null
+  alfajor: null,
+  localVotes: {}, // { usuarioN: { productId: { attrKey: value } } }
+  localNames: {} // { usuarioN: "Nombre visible" }
 };
 
 // ==== LOGIC ====
+const STORAGE_VOTES = 'alfajor-stats-votes';
+const STORAGE_USER = 'alfajor-stats-user';
+const STORAGE_NAMES = 'alfajor-stats-names';
+
+function loadLocalVotes() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_VOTES)) || {}; } catch (e) { return {}; }
+}
+
+function loadLocalNames() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_NAMES)) || {}; } catch (e) { return {}; }
+}
+
+function persistNames() {
+  try { localStorage.setItem(STORAGE_NAMES, JSON.stringify(state.localNames)); } catch (e) { /* storage blocked */ }
+}
+
+function persistLocalVotes() {
+  try { localStorage.setItem(STORAGE_VOTES, JSON.stringify(state.localVotes)); } catch (e) { /* storage blocked */ }
+}
+
+function userIndex(uid) {
+  const m = /(\d+)/.exec(String(uid || ''));
+  return m ? parseInt(m[1], 10) - 1 : -1;
+}
+
+// Base matrix (embedded Excel votes) + every vote saved in this browser.
+function effectiveMatrix(p, key) {
+  const base = (p.raw && p.raw[key] ? p.raw[key] : [p.scores[key]]).slice();
+  Object.keys(state.localVotes).forEach((uid) => {
+    const idx = userIndex(uid);
+    const mine = state.localVotes[uid] && state.localVotes[uid][p.id] && state.localVotes[uid][p.id][key];
+    if (idx >= 0 && idx < base.length && mine != null) base[idx] = Number(mine);
+  });
+  return base;
+}
+
+function scoreOf(p, key) {
+  const list = effectiveMatrix(p, key).filter((v) => v != null && Number.isFinite(v));
+  if (!list.length) return Number(p.scores[key] || 0);
+  return list.reduce((a, b) => a + b, 0) / list.length;
+}
+
+function voteCountOf(p, key) {
+  return effectiveMatrix(p, key).filter((v) => v != null && Number.isFinite(v)).length;
+}
+
 function totalScore(p) {
-  const sum = PARAMS.reduce((acc, par) => acc + Number(p.scores[par.key] || 0), 0);
+  const sum = PARAMS.reduce((acc, par) => acc + scoreOf(p, par.key), 0);
   return sum / PARAMS.length;
 }
 
@@ -325,7 +424,8 @@ function setFeatured(id) {
   const list = document.getElementById('kpi-params');
   list.textContent = '';
   PARAMS.forEach((par) => {
-    const val = Number(p.scores[par.key] || 0);
+    const val = scoreOf(p, par.key);
+    const n = voteCountOf(p, par.key);
     const li = document.createElement('li');
 
     const lab = document.createElement('span');
@@ -334,7 +434,11 @@ function setFeatured(id) {
 
     const num = document.createElement('span');
     num.className = 'pval';
-    num.textContent = val.toFixed(0);
+    num.textContent = val.toFixed(1);
+
+    const count = document.createElement('span');
+    count.className = 'pcount';
+    count.textContent = n === 1 ? '1 voto' : n + ' votos';
 
     const track = document.createElement('span');
     track.className = 'track';
@@ -344,7 +448,7 @@ function setFeatured(id) {
     fill.style.background = p.color;
     track.appendChild(fill);
 
-    li.append(lab, num, track);
+    li.append(lab, num, count, track);
     list.appendChild(li);
   });
 
@@ -422,7 +526,7 @@ function renderCharts() {
       labels: PARAMS.map((p) => p.short),
       datasets: data.map((p) => ({
         label: label(p),
-        data: PARAMS.map((par) => Number(p.scores[par.key] || 0)),
+        data: PARAMS.map((par) => Number(scoreOf(p, par.key).toFixed(2))),
         borderColor: p.color,
         backgroundColor: withAlpha(p.color, 0.12),
         pointBackgroundColor: p.color,
@@ -453,7 +557,7 @@ function renderCharts() {
       labels: PARAMS.map((p) => p.short),
       datasets: data.map((p) => ({
         label: p.brand,
-        data: PARAMS.map((par) => Number(p.scores[par.key] || 0)),
+        data: PARAMS.map((par) => Number(scoreOf(p, par.key).toFixed(2))),
         backgroundColor: p.color,
         borderRadius: 4
       }))
@@ -468,6 +572,186 @@ function renderCharts() {
       plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10 } } }
     }
   });
+}
+
+// ==== VOTES ====
+function voteUserSel() { return document.getElementById('vote-user'); }
+function voteAlfajorSel() { return document.getElementById('vote-alfajor'); }
+function voteNameInput() { return document.getElementById('vote-name'); }
+
+function userCount() {
+  const p = PRODUCTS[0];
+  return p && p.raw && p.raw.priceQuality ? p.raw.priceQuality.length : 15;
+}
+
+function refreshUserLabels() {
+  const sel = voteUserSel();
+  Array.from(sel.options).forEach((opt) => {
+    const name = state.localNames[opt.value];
+    opt.textContent = name ? name + ' (' + opt.value + ')' : opt.value;
+  });
+}
+
+function buildVoteControls() {
+  const userSel = voteUserSel();
+  for (let i = 1; i <= userCount(); i++) {
+    const opt = document.createElement('option');
+    opt.value = 'usuario' + i;
+    opt.textContent = 'usuario' + i;
+    userSel.appendChild(opt);
+  }
+  try {
+    const saved = localStorage.getItem(STORAGE_USER);
+    if (saved) userSel.value = saved;
+  } catch (e) { /* storage blocked */ }
+  refreshUserLabels();
+  voteNameInput().value = state.localNames[userSel.value] || '';
+
+  const alfSel = voteAlfajorSel();
+  PRODUCTS.forEach((p) => {
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = label(p);
+    alfSel.appendChild(opt);
+  });
+
+  const sliders = document.getElementById('vote-sliders');
+  PARAMS.forEach((par) => {
+    const row = document.createElement('div');
+    row.className = 'vote-row';
+
+    const lab = document.createElement('label');
+    lab.setAttribute('for', 'vote-' + par.key);
+    lab.textContent = par.label;
+
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.id = 'vote-' + par.key;
+    input.min = '1';
+    input.max = '10';
+    input.step = '1';
+    input.value = '5';
+
+    const out = document.createElement('output');
+    out.setAttribute('for', 'vote-' + par.key);
+    out.textContent = '5';
+    input.addEventListener('input', () => { out.textContent = input.value; });
+
+    row.append(lab, input, out);
+    sliders.appendChild(row);
+  });
+}
+
+function prefillVoteForm() {
+  const uid = voteUserSel().value;
+  const pid = voteAlfajorSel().value;
+  const p = PRODUCTS.find((x) => x.id === pid);
+  if (!p) return;
+  const idx = userIndex(uid);
+  PARAMS.forEach((par) => {
+    const local = state.localVotes[uid] && state.localVotes[uid][pid] && state.localVotes[uid][pid][par.key];
+    const base = p.raw && p.raw[par.key] ? p.raw[par.key][idx] : null;
+    const v = local != null ? local : (base != null ? base : 5);
+    const input = document.getElementById('vote-' + par.key);
+    input.value = String(v);
+    input.nextElementSibling.textContent = String(v);
+  });
+}
+
+function renderVoteProgress() {
+  const uid = voteUserSel().value;
+  const mine = state.localVotes[uid] || {};
+  const done = PRODUCTS.filter((p) => mine[p.id]).length;
+  document.getElementById('vote-progress').textContent = done + ' de ' + PRODUCTS.length + ' alfajores votados';
+}
+
+function onVoteSubmit(ev) {
+  ev.preventDefault();
+  const uid = voteUserSel().value;
+  const pid = voteAlfajorSel().value;
+  const p = PRODUCTS.find((x) => x.id === pid);
+  if (!p) return;
+
+  if (!state.localVotes[uid]) state.localVotes[uid] = {};
+  if (!state.localVotes[uid][pid]) state.localVotes[uid][pid] = {};
+  PARAMS.forEach((par) => {
+    state.localVotes[uid][pid][par.key] = Number(document.getElementById('vote-' + par.key).value);
+  });
+  persistLocalVotes();
+
+  document.getElementById('vote-status').textContent = 'Voto guardado: ' + label(p);
+  renderVoteProgress();
+  setFeatured(state.featuredId); // refresh KPI numbers (scores may shift)
+  renderCharts();
+
+  // friendly flow: jump to the next alfajor this user has not voted yet
+  const next = PRODUCTS.find((x) => !state.localVotes[uid][x.id]);
+  if (next) { voteAlfajorSel().value = next.id; prefillVoteForm(); }
+}
+
+function csvEscape(v) {
+  const s = String(v);
+  return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+function downloadFile(filename, content, type) {
+  const blob = new Blob([content], { type: type });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
+}
+
+function exportVotesCsv() {
+  const n = userCount();
+  const header = ['Marca', 'Atributo'].concat(Array.from({ length: n }, (_, i) => 'usuario' + (i + 1)));
+  const lines = [header.join(',')];
+  PRODUCTS.forEach((p) => {
+    PARAMS.forEach((par) => {
+      const row = [p.brand, par.label].concat(effectiveMatrix(p, par.key).map((v) => (v == null ? '' : v)));
+      lines.push(row.join(','));
+    });
+  });
+  const csv = '\uFEFF' + lines.join('\r\n'); // BOM so Excel reads accents
+  downloadFile('votaciones-actualizadas.csv', csv, 'text/csv;charset=utf-8');
+
+  const named = Object.keys(state.localNames).filter((uid) => state.localNames[uid] && /^usuario\d+$/i.test(uid));
+  if (named.length) {
+    const nlines = ['usuario,nombre'].concat(named.map((uid) => uid + ',' + csvEscape(state.localNames[uid])));
+    downloadFile('nombres-usuarios.csv', '\uFEFF' + nlines.join('\r\n'), 'text/csv;charset=utf-8');
+    document.getElementById('vote-status').textContent = 'CSV de votos y de nombres descargados (' + (PRODUCTS.length * PARAMS.length) + ' filas)';
+  } else {
+    document.getElementById('vote-status').textContent = 'CSV descargado (' + (PRODUCTS.length * PARAMS.length) + ' filas)';
+  }
+}
+
+function initVotes() {
+  state.localVotes = loadLocalVotes();
+  state.localNames = loadLocalNames();
+  buildVoteControls();
+  prefillVoteForm();
+  renderVoteProgress();
+  document.getElementById('vote-form').addEventListener('submit', onVoteSubmit);
+  document.getElementById('vote-export').addEventListener('click', exportVotesCsv);
+  voteUserSel().addEventListener('change', () => {
+    try { localStorage.setItem(STORAGE_USER, voteUserSel().value); } catch (e) { /* storage blocked */ }
+    voteNameInput().value = state.localNames[voteUserSel().value] || '';
+    prefillVoteForm();
+    renderVoteProgress();
+  });
+  voteNameInput().addEventListener('change', () => {
+    const uid = voteUserSel().value;
+    const name = voteNameInput().value.trim().slice(0, 30);
+    if (name) state.localNames[uid] = name;
+    else delete state.localNames[uid];
+    persistNames();
+    refreshUserLabels();
+    document.getElementById('vote-status').textContent = name ? 'Nombre guardado: ' + name : 'Nombre quitado';
+  });
+  voteAlfajorSel().addEventListener('change', prefillVoteForm);
 }
 
 // ==== 3D ====
@@ -617,6 +901,7 @@ function init() {
   state.alfajor = initAlfajor();
   const fp = featuredProduct();
   if (state.alfajor && fp) state.alfajor.setProduct(fp);
+  initVotes();
   renderCharts();
 
   document.getElementById('btn-all').addEventListener('click', () => {

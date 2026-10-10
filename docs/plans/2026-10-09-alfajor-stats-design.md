@@ -108,6 +108,37 @@ Ambas embebidas inline con comentario `<!-- LIB: ... -->` al inicio del bloque.
 - Revisar consola sin errores.
 - Reportar tamaño final (se espera superar ~800 KB por las librerías).
 
+## Sistema de votación (ampliación 2026-09-09)
+
+Aprobado por el usuario: estructura "tidy" (opción A).
+
+- Hoja `Alfajores`: solo metadata (Marca, Modelo, Color).
+- Hoja `Votaciones`: 60 filas (10 alfajores × 6 atributos) × columnas `usuario1..usuario15`.
+- Regla de cálculo: cada atributo final = media de los votos no vacíos (1–10);
+  celdas vacías = no votó; puntaje total = media simple de los 6 atributos.
+- Validación en `build.js`: atributo desconocido, marca sin votos, voto fuera
+  de rango o sin votos ⇒ error con hoja/fila/marca/atributo y exit 1.
+- `PRODUCTS` ahora incluye `scores` (promedios con 2 decimales) y
+  `votes` (cantidad de votos por atributo); el KPI muestra "N votos" bajo cada atributo.
+- Los votos de ejemplo son deterministas (PRNG sembrado, sesgo por usuario)
+  y se regeneran con `node tools/make-excel.js`.
+
+### Votación desde la página (ampliación 2026-09-09, aprobada)
+
+- Panel "Tu votación": el usuario elige su identidad (`usuarioN`), vota un
+  alfajor a la vez con 6 sliders 1–10, con prefill de su voto existente.
+- Guardado en `localStorage` (clave `alfajor-stats-votes`), tolerante a
+  almacenamiento bloqueado.
+- Overlay en vivo: los promedios (KPI, gráficos, total) se recalculan
+  sumando los votos locales sobre la matriz embebida (`PRODUCTS[].raw`).
+- Flujo: al guardar, salta al siguiente alfajor sin votar del usuario.
+- Export "votaciones-actualizadas.csv": matriz completa mergeada
+  (60 filas + header, con BOM para Excel). Para publicar: reemplazar la
+  hoja `Votaciones` con el CSV y correr `node tools/build.js`.
+- Restricción heredada: el navegador no puede escribir el `.xlsx` directo
+  (file://); el CSV es el puente. Votos compartidos en tiempo real quedan
+  fuera (requeriría backend).
+
 ## Riesgos / pendientes
 
 - El peso del archivo superará ~1 MB con Three.js (a reportar al usuario).
