@@ -1,4 +1,5 @@
 node_modules/
 tools/smoke*.png
+tools/cloud-config.json
 ~$*
 AGENTS.md

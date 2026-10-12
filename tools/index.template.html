@@ -164,7 +164,8 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .vote-row input[type="range"] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
 .vote-row output { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
 .vote-actions { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.8rem; flex-wrap: wrap; }
-#vote-status { color: var(--accent); font-size: 0.85rem; }
+#vote-status, #cloud-status { color: var(--accent); font-size: 0.85rem; }
+#cloud-status { color: var(--text-muted); }
 footer { margin: 1.5rem 0 0.5rem; color: var(--text-muted); font-size: 0.8rem; text-align: center; }
 </style>
 </head>
@@ -223,6 +224,7 @@ footer { margin: 1.5rem 0 0.5rem; color: var(--text-muted); font-size: 0.8rem; t
           <select id="vote-alfajor"></select>
         </div>
         <p class="vote-progress" id="vote-progress" aria-live="polite"></p>
+        <p class="vote-progress" id="cloud-status" aria-live="polite"></p>
       </div>
       <form id="vote-form">
         <div id="vote-sliders"></div>
@@ -269,6 +271,12 @@ __LIB_CHART__
 // Embedded from datos/alfajores-ejemplo.xlsx (build: tools/build.js)
 const PRODUCTS = __DATA__;
 
+// Cloud voting (Google Apps Script web app). Empty endpoint => local-only mode.
+const CONFIG = {
+  votesEndpoint: __VOTES_ENDPOINT__,
+  antiSpamToken: __ANTI_SPAM_TOKEN__
+};
+
 const PARAMS = [
   { key: 'priceQuality',  label: 'Relación calidad/precio',   short: 'Calidad/precio' },
   { key: 'dulceDeLeche',  label: 'Cantidad de dulce de leche', short: 'Dulce de leche' },
@@ -284,7 +292,9 @@ const state = {
   charts: { ranking: null, radar: null, bars: null },
   alfajor: null,
   localVotes: {}, // { usuarioN: { productId: { attrKey: value } } }
-  localNames: {} // { usuarioN: "Nombre visible" }
+  localNames: {}, // { usuarioN: "Nombre visible" }
+  server: null, // { alfajorId: { attrKey: { sum, count } } } or null = no cloud data
+  pending: {} // { "usuarioN|productId": true } = local vote the server has not confirmed yet
 };
 
 // ==== LOGIC ====
@@ -324,13 +334,36 @@ function effectiveMatrix(p, key) {
   return base;
 }
 
+function isPendingVote(uid, pid) {
+  return !!(state.pending[uid + '|' + pid]);
+}
+
+// Cloud mode: server totals (everyone) + local votes not yet confirmed.
+function cloudStatOf(p, key) {
+  let sum = 0;
+  let count = 0;
+  const t = state.server && state.server[p.id] && state.server[p.id][key];
+  if (t && Number.isFinite(t.sum) && Number.isFinite(t.count)) { sum = t.sum; count = t.count; }
+  Object.keys(state.localVotes).forEach((uid) => {
+    if (!isPendingVote(uid, p.id)) return;
+    const v = state.localVotes[uid][p.id] && state.localVotes[uid][p.id][key];
+    if (v != null) { sum += Number(v); count += 1; }
+  });
+  return { sum: sum, count: count };
+}
+
 function scoreOf(p, key) {
+  if (state.server) {
+    const st = cloudStatOf(p, key);
+    return st.count ? st.sum / st.count : 0;
+  }
   const list = effectiveMatrix(p, key).filter((v) => v != null && Number.isFinite(v));
   if (!list.length) return Number(p.scores[key] || 0);
   return list.reduce((a, b) => a + b, 0) / list.length;
 }
 
 function voteCountOf(p, key) {
+  if (state.server) return cloudStatOf(p, key).count;
   return effectiveMatrix(p, key).filter((v) => v != null && Number.isFinite(v)).length;
 }
 
@@ -574,6 +607,76 @@ function renderCharts() {
   });
 }
 
+// ==== CLOUD ====
+function cloudEnabled() {
+  return !!CONFIG.votesEndpoint;
+}
+
+function setCloudStatus(text) {
+  document.getElementById('cloud-status').textContent = text;
+}
+
+function refreshAfterVote(message) {
+  document.getElementById('vote-status').textContent = message;
+  renderVoteProgress();
+  setFeatured(state.featuredId);
+  renderCharts();
+}
+
+async function fetchServerTotals() {
+  const res = await fetch(CONFIG.votesEndpoint + '?_=' + Date.now(), { redirect: 'follow' });
+  const data = await res.json();
+  if (!data || !data.ok || !data.totals) throw new Error('bad response');
+  return data.totals;
+}
+
+async function sendVoteToServer(uid, pid, name, scores) {
+  // text/plain avoids the CORS preflight, which Apps Script does not handle.
+  const res = await fetch(CONFIG.votesEndpoint, {
+    method: 'POST',
+    redirect: 'follow',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({
+      token: CONFIG.antiSpamToken,
+      usuarioId: uid,
+      usuarioNombre: name || '',
+      alfajorId: pid,
+      scores: scores
+    })
+  });
+  const data = await res.json();
+  if (!data || !data.ok || !data.totals) throw new Error((data && data.error) || 'send failed');
+  return data.totals;
+}
+
+function syncVoteToCloud(uid, pid, p) {
+  const scores = {};
+  PARAMS.forEach((par) => { scores[par.key] = Number(state.localVotes[uid][pid][par.key]); });
+  sendVoteToServer(uid, pid, state.localNames[uid] || '', scores).then((totals) => {
+    state.server = totals;
+    delete state.pending[uid + '|' + pid];
+    setCloudStatus('Nube: conectado · voto sincronizado');
+    refreshAfterVote('Voto guardado y sincronizado: ' + label(p));
+  }).catch(() => {
+    state.pending[uid + '|' + pid] = true;
+    setCloudStatus('Nube: sin conexión · voto pendiente');
+    refreshAfterVote('Voto guardado localmente (sin conexión): ' + label(p));
+  });
+}
+
+function initCloud() {
+  if (!cloudEnabled()) return;
+  setCloudStatus('Nube: conectando…');
+  fetchServerTotals().then((totals) => {
+    state.server = totals;
+    setCloudStatus('Nube: conectado (votos de todos)');
+    setFeatured(state.featuredId);
+    renderCharts();
+  }).catch(() => {
+    setCloudStatus('Nube: sin conexión · modo local');
+  });
+}
+
 // ==== VOTES ====
 function voteUserSel() { return document.getElementById('vote-user'); }
 function voteAlfajorSel() { return document.getElementById('vote-alfajor'); }
@@ -679,10 +782,12 @@ function onVoteSubmit(ev) {
   });
   persistLocalVotes();
 
-  document.getElementById('vote-status').textContent = 'Voto guardado: ' + label(p);
-  renderVoteProgress();
-  setFeatured(state.featuredId); // refresh KPI numbers (scores may shift)
-  renderCharts();
+  if (cloudEnabled()) {
+    refreshAfterVote('Voto guardado: ' + label(p));
+    syncVoteToCloud(uid, pid, p);
+  } else {
+    refreshAfterVote('Voto guardado: ' + label(p));
+  }
 
   // friendly flow: jump to the next alfajor this user has not voted yet
   const next = PRODUCTS.find((x) => !state.localVotes[uid][x.id]);
@@ -903,6 +1008,7 @@ function init() {
   const fp = featuredProduct();
   if (state.alfajor && fp) state.alfajor.setProduct(fp);
   renderCharts();
+  initCloud(); // async: switches KPI/charts to server totals when reachable
 
   document.getElementById('btn-all').addEventListener('click', () => {
     state.selected = new Set(PRODUCTS.map((p) => p.id));

@@ -118,11 +118,20 @@ function main() {
   const products = readProducts();
   let html = fs.readFileSync(path.join(__dirname, 'index.template.html'), 'utf8');
 
+  // Optional cloud config (tools/cloud-config.json, git-ignored). No file => local-only mode.
+  let cloud = { endpoint: '', token: 'alfajor-stats-2026' };
+  const cloudPath = path.join(__dirname, 'cloud-config.json');
+  if (fs.existsSync(cloudPath)) {
+    cloud = Object.assign(cloud, JSON.parse(fs.readFileSync(cloudPath, 'utf8')));
+  }
+
   const dataJson = JSON.stringify(products, null, 2);
   const replacements = {
     '__LIB_THREE__': inlineLib('three.min.js'),
     '__LIB_CHART__': inlineLib('chart.umd.min.js'),
     '__DATA__': dataJson,
+    '__VOTES_ENDPOINT__': JSON.stringify(cloud.endpoint),
+    '__ANTI_SPAM_TOKEN__': JSON.stringify(cloud.token),
   };
 
   Object.keys(replacements).forEach((token) => {
@@ -136,6 +145,7 @@ function main() {
   fs.writeFileSync(out, html);
   console.log('index.html generado:', out);
   console.log('Alfajores embebidos:', products.length, '| tamaño:', (fs.statSync(out).size / 1024).toFixed(0) + ' KB');
+  console.log('Votaciones nube:', cloud.endpoint ? cloud.endpoint : '(modo local: sin endpoint)');
   products.forEach((p) => {
     const avg = Object.values(p.scores).reduce((a, b) => a + b, 0) / 6;
     console.log(' - ' + p.brand + ' ' + p.name + ': ' + avg.toFixed(2) + ' (' + p.votes.priceQuality + ' votos/atributo)');
