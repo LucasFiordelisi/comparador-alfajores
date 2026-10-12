@@ -897,11 +897,11 @@ function initAlfajor() {
 function init() {
   renderToggles();
   renderSelect();
+  initVotes(); // must run before the first render: loads persisted local votes
   setFeatured(state.featuredId);
   state.alfajor = initAlfajor();
   const fp = featuredProduct();
   if (state.alfajor && fp) state.alfajor.setProduct(fp);
-  initVotes();
   renderCharts();
 
   document.getElementById('btn-all').addEventListener('click', () => {

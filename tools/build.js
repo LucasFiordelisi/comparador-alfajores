@@ -57,7 +57,7 @@ function readVotes(ws) {
       }
       return v;
     });
-    if (list.every((v) => v === null)) throw new Error('Votaciones fila ' + fila + ' (' + brand + ' / ' + label + '): sin ningún voto.');
+    // Fully empty rows are legal: the app starts at 0 votes (people vote in-app).
     votes.set(brand + '||' + key, list);
   });
 
@@ -90,7 +90,7 @@ function readProducts() {
       const list = votes.get(p.brand + '||' + key);
       if (!list) throw new Error('Alfajores fila ' + (i + 2) + ' (' + p.brand + '): faltan votos para "' + label + '".');
       const filled = list.filter((v) => v !== null);
-      const avg = filled.reduce((a, b) => a + b, 0) / filled.length;
+      const avg = filled.length ? filled.reduce((a, b) => a + b, 0) / filled.length : 0;
       p.scores[key] = round2(avg);
       p.votes[key] = filled.length;
       p.raw[key] = list; // nulls preserved: the app overlays local votes by position

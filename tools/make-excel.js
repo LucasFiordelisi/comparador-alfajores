@@ -8,6 +8,10 @@ const path = require('path');
 
 const USERS = 15;
 
+// false = empty vote cells (the app starts at 0 votes until people vote);
+// true = deterministic demo votes centered on the base scores below.
+const DEMO_VOTES = false;
+
 const PARAMS = [
   ['Relación calidad/precio', 'priceQuality'],
   ['Cantidad de dulce de leche', 'dulceDeLeche'],
@@ -81,6 +85,7 @@ async function main() {
     PARAMS.forEach(([label], attrIdx) => {
       const row = [brand, label];
       for (let u = 0; u < USERS; u++) {
+        if (!DEMO_VOTES) { row.push(''); continue; }
         const noise = rnd() * 2.8 - 1.4;
         let vote = Math.round(base[attrIdx] + userBias[u] + noise);
         vote = Math.max(1, Math.min(10, vote));
