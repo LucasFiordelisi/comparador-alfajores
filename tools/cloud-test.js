@@ -72,8 +72,14 @@ async function main() {
   });
   if (!gid) throw new Error('Guaymallen product not found');
 
+  // usuario5 registers a name so the cloud user directory can be tested.
+  await page.select('#vote-user', 'usuario5');
+  await page.type('#vote-name', 'Maria Cloud');
+  await page.evaluate(() => document.getElementById('vote-name').dispatchEvent(new Event('change', { bubbles: true })));
+
   await vote(page, 'usuario5', gid, all(8));
   const afterFirst = await kpi(page, gid);
+  const serverUser5 = await page.evaluate(() => (state.serverUsers && state.serverUsers.usuario5) || '');
   await vote(page, 'usuario6', gid, all(2));
   const afterSecond = await kpi(page, gid);
   await vote(page, 'usuario5', gid, all(10)); // upsert: replaces usuario5's 8s
@@ -84,13 +90,36 @@ async function main() {
   await page.waitForFunction(() => /conectado/.test(document.getElementById('cloud-status').textContent), { timeout: 5000 });
   const afterReload = await kpi(page, gid);
 
+  // Fresh profile (no localStorage): the cloud directory must show Maria Cloud.
+  const os = require('os');
+  const freshProfile = fs.mkdtempSync(path.join(os.tmpdir(), 'alfajor-fresh-'));
+  const freshBrowser = await puppeteer.launch({
+    executablePath: 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    headless: 'new',
+    args: ['--no-sandbox'],
+    userDataDir: freshProfile,
+  });
+  const fresh = await freshBrowser.newPage();
+  await fresh.setViewport({ width: 1280, height: 900 });
+  await fresh.goto(pathToFileURL(path.join(ROOT, 'index.html')).href, { waitUntil: 'load' });
+  await fresh.waitForFunction(() => /conectado/.test(document.getElementById('cloud-status').textContent), { timeout: 5000 });
+  const dirOption = await fresh.evaluate(() => {
+    const opt = Array.from(document.getElementById('vote-user').options).find((o) => o.value === 'usuario5');
+    return opt ? opt.textContent : '';
+  });
+  await fresh.select('#vote-user', 'usuario5');
+  const dirNameInput = await fresh.evaluate(() => document.getElementById('vote-name').value);
+  await freshBrowser.close();
+
   const ok =
     afterFirst.score === '8.0' && afterFirst.firstCount === '1 voto' &&
+    serverUser5 === 'Maria Cloud' &&
     afterSecond.score === '5.0' && afterSecond.firstCount === '2 votos' &&
     afterRevote.score === '6.0' && afterRevote.firstCount === '2 votos' &&
-    afterReload.score === '6.0' && afterReload.firstCount === '2 votos';
+    afterReload.score === '6.0' && afterReload.firstCount === '2 votos' &&
+    dirOption === 'Maria Cloud (usuario5)' && dirNameInput === 'Maria Cloud';
 
-  const report = { afterFirst, afterSecond, afterRevote, afterReload, ok, errors };
+  const report = { afterFirst, serverUser5, afterSecond, afterRevote, afterReload, dirOption, dirNameInput, ok, errors };
   console.log(JSON.stringify(report, null, 2));
 
   await browser.close();

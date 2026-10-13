@@ -22,6 +22,18 @@ function computeTotals(rows) {
   return totals;
 }
 
+function computeUsers(rows) {
+  const users = {};
+  rows.forEach((row) => {
+    if (row.usuarioId && row.usuarioNombre) users[row.usuarioId] = row.usuarioNombre;
+  });
+  return users;
+}
+
+function payload(rows) {
+  return { ok: true, totals: computeTotals(rows), users: computeUsers(rows) };
+}
+
 function startServer(port) {
   const rows = []; // { usuarioId, usuarioNombre, alfajorId, scores }
 
@@ -37,7 +49,7 @@ function startServer(port) {
     };
 
     if (req.method === 'GET') {
-      send({ ok: true, totals: computeTotals(rows) });
+      send(payload(rows));
       return;
     }
 
@@ -62,7 +74,7 @@ function startServer(port) {
       const record = { usuarioId: uid, usuarioNombre: String(body.usuarioNombre || '').slice(0, 30), alfajorId: pid, scores };
       if (existing) Object.assign(existing, record);
       else rows.push(record);
-      send({ ok: true, totals: computeTotals(rows) });
+      send(payload(rows));
     });
   });
 

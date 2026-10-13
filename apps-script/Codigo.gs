@@ -28,16 +28,22 @@ function sheet_() {
   return sh;
 }
 
-// Agrega la hoja completa: { alfajorId: { param: { sum, count } } }.
-function totals_() {
+// Agrega la hoja completa: { totals: {alfajorId: {param: {sum, count}}},
+//                             users: {usuarioId: nombre} }.
+function data_() {
   var cached = CacheService.getScriptCache().get(CACHE_KEY);
   if (cached) return JSON.parse(cached);
 
   var values = sheet_().getDataRange().getValues(); // fila 0 = encabezados
   var totals = {};
+  var users = {};
   for (var r = 1; r < values.length; r++) {
     var row = values[r];
+    var uid = String(row[1]);
+    var nm = String(row[2] || '');
     var pid = String(row[3]);
+    // El upsert sobrescribe la fila, asi que la ultima aparicion tiene el nombre actual.
+    if (uid && nm) users[uid] = nm;
     if (!pid) continue;
     if (!totals[pid]) totals[pid] = {};
     for (var i = 0; i < PARAMS.length; i++) {
@@ -49,8 +55,9 @@ function totals_() {
       totals[pid][k].count += 1;
     }
   }
-  CacheService.getScriptCache().put(CACHE_KEY, JSON.stringify(totals), CACHE_SECONDS);
-  return totals;
+  var data = { totals: totals, users: users };
+  CacheService.getScriptCache().put(CACHE_KEY, JSON.stringify(data), CACHE_SECONDS);
+  return data;
 }
 
 function json_(obj) {
@@ -59,7 +66,8 @@ function json_(obj) {
 }
 
 function doGet() {
-  return json_({ ok: true, totals: totals_() });
+  var d = data_();
+  return json_({ ok: true, totals: d.totals, users: d.users });
 }
 
 function doPost(e) {
@@ -104,7 +112,8 @@ function doPost(e) {
     else sh.appendRow(row);
 
     CacheService.getScriptCache().remove(CACHE_KEY);
-    return json_({ ok: true, totals: totals_() });
+    var d = data_();
+    return json_({ ok: true, totals: d.totals, users: d.users });
   } finally {
     lock.releaseLock();
   }

@@ -294,6 +294,7 @@ const state = {
   localVotes: {}, // { usuarioN: { productId: { attrKey: value } } }
   localNames: {}, // { usuarioN: "Nombre visible" }
   server: null, // { alfajorId: { attrKey: { sum, count } } } or null = no cloud data
+  serverUsers: {}, // { usuarioN: "Nombre" } from everyone who voted (cloud directory)
   pending: {} // { "usuarioN|productId": true } = local vote the server has not confirmed yet
 };
 
@@ -623,11 +624,23 @@ function refreshAfterVote(message) {
   renderCharts();
 }
 
-async function fetchServerTotals() {
+function applyServerData(data) {
+  state.server = data.totals;
+  state.serverUsers = data.users || {};
+  refreshUserLabels();
+  // The cloud name follows its owner across devices: show it in the name
+  // field unless this browser typed a different one.
+  const uid = voteUserSel() && voteUserSel().value;
+  if (uid && voteNameInput() && !state.localNames[uid]) {
+    voteNameInput().value = serverName(uid);
+  }
+}
+
+async function fetchServerData() {
   const res = await fetch(CONFIG.votesEndpoint + '?_=' + Date.now(), { redirect: 'follow' });
   const data = await res.json();
   if (!data || !data.ok || !data.totals) throw new Error('bad response');
-  return data.totals;
+  return data;
 }
 
 async function sendVoteToServer(uid, pid, name, scores) {
@@ -646,14 +659,14 @@ async function sendVoteToServer(uid, pid, name, scores) {
   });
   const data = await res.json();
   if (!data || !data.ok || !data.totals) throw new Error((data && data.error) || 'send failed');
-  return data.totals;
+  return data;
 }
 
 function syncVoteToCloud(uid, pid, p) {
   const scores = {};
   PARAMS.forEach((par) => { scores[par.key] = Number(state.localVotes[uid][pid][par.key]); });
-  sendVoteToServer(uid, pid, state.localNames[uid] || '', scores).then((totals) => {
-    state.server = totals;
+  sendVoteToServer(uid, pid, state.localNames[uid] || '', scores).then((data) => {
+    applyServerData(data);
     delete state.pending[uid + '|' + pid];
     setCloudStatus('Nube: conectado · voto sincronizado');
     refreshAfterVote('Voto guardado y sincronizado: ' + label(p));
@@ -667,8 +680,8 @@ function syncVoteToCloud(uid, pid, p) {
 function initCloud() {
   if (!cloudEnabled()) return;
   setCloudStatus('Nube: conectando…');
-  fetchServerTotals().then((totals) => {
-    state.server = totals;
+  fetchServerData().then((data) => {
+    applyServerData(data);
     setCloudStatus('Nube: conectado (votos de todos)');
     setFeatured(state.featuredId);
     renderCharts();
@@ -687,10 +700,15 @@ function userCount() {
   return p && p.raw && p.raw.priceQuality ? p.raw.priceQuality.length : 15;
 }
 
+function serverName(uid) {
+  return (state.serverUsers && state.serverUsers[uid]) || '';
+}
+
 function refreshUserLabels() {
   const sel = voteUserSel();
   Array.from(sel.options).forEach((opt) => {
-    const name = state.localNames[opt.value];
+    // Own typed name wins; otherwise show the name that user registered in the cloud.
+    const name = state.localNames[opt.value] || serverName(opt.value);
     opt.textContent = name ? name + ' (' + opt.value + ')' : opt.value;
   });
 }
@@ -708,7 +726,7 @@ function buildVoteControls() {
     if (saved) userSel.value = saved;
   } catch (e) { /* storage blocked */ }
   refreshUserLabels();
-  voteNameInput().value = state.localNames[userSel.value] || '';
+  voteNameInput().value = state.localNames[userSel.value] || serverName(userSel.value) || '';
 
   const alfSel = voteAlfajorSel();
   PRODUCTS.forEach((p) => {
@@ -768,8 +786,18 @@ function renderVoteProgress() {
   document.getElementById('vote-progress').textContent = done + ' de ' + PRODUCTS.length + ' alfajores votados';
 }
 
+function syncNameFromInput() {
+  const uid = voteUserSel().value;
+  const name = voteNameInput().value.trim().slice(0, 30);
+  if (name) state.localNames[uid] = name;
+  else delete state.localNames[uid];
+  persistNames();
+  refreshUserLabels();
+}
+
 function onVoteSubmit(ev) {
   ev.preventDefault();
+  syncNameFromInput(); // keep the name that goes to the server in sync with the field
   const uid = voteUserSel().value;
   const pid = voteAlfajorSel().value;
   const p = PRODUCTS.find((x) => x.id === pid);
@@ -843,17 +871,14 @@ function initVotes() {
   document.getElementById('vote-export').addEventListener('click', exportVotesCsv);
   voteUserSel().addEventListener('change', () => {
     try { localStorage.setItem(STORAGE_USER, voteUserSel().value); } catch (e) { /* storage blocked */ }
-    voteNameInput().value = state.localNames[voteUserSel().value] || '';
+    const uid = voteUserSel().value;
+    voteNameInput().value = state.localNames[uid] || serverName(uid) || '';
     prefillVoteForm();
     renderVoteProgress();
   });
   voteNameInput().addEventListener('change', () => {
-    const uid = voteUserSel().value;
-    const name = voteNameInput().value.trim().slice(0, 30);
-    if (name) state.localNames[uid] = name;
-    else delete state.localNames[uid];
-    persistNames();
-    refreshUserLabels();
+    syncNameFromInput();
+    const name = state.localNames[voteUserSel().value] || '';
     document.getElementById('vote-status').textContent = name ? 'Nombre guardado: ' + name : 'Nombre quitado';
   });
   voteAlfajorSel().addEventListener('change', prefillVoteForm);

@@ -24,6 +24,11 @@ Google Apps Script como endpoint gratuito detrás de un Google Sheet.
   KPI + gráficos muestran la suma de todos; al votar envía `doPost` y refresca
   en vivo. Si el fetch falla → modo local de respaldo y voto marcado como
   *pendiente* (se suma a los últimos totales conocidos hasta poder sincronizar).
+- **Directorio de participantes**: `doGet`/`doPost` devuelven además
+  `users: {usuarioId: nombre}` (columna `usuarioNombre` de la misma hoja).
+  El desplegable muestra "Nombre (usuarioN)" para quien ya votó; el nombre
+  propio tipeado tiene prioridad y sigue al dueño entre dispositivos. Los
+  promedios nunca exponen filas individuales.
 - Sin contraseña ni API key en el HTML: solo la URL del web app y un token
   anti-spam no secreto (filtra robots; cualquiera puede leerlo en el código).
 
