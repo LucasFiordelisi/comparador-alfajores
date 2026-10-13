@@ -166,6 +166,12 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .vote-actions { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.8rem; flex-wrap: wrap; }
 #vote-status, #cloud-status { color: var(--accent); font-size: 0.85rem; }
 #cloud-status { color: var(--text-muted); }
+#slot-warn { color: #c98a1f; font-weight: 600; }
+.vote-status-lines { display: grid; gap: 0.25rem; }
+@media (min-width: 640px) {
+  .vote-status-lines { grid-column: 1 / -1; }
+}
+button:disabled { opacity: 0.5; cursor: wait; }
 footer { margin: 1.5rem 0 0.5rem; color: var(--text-muted); font-size: 0.8rem; text-align: center; }
 </style>
 </head>
@@ -224,13 +230,19 @@ footer { margin: 1.5rem 0 0.5rem; color: var(--text-muted); font-size: 0.8rem; t
           <select id="vote-alfajor"></select>
         </div>
         <p class="vote-progress" id="vote-progress" aria-live="polite"></p>
-        <p class="vote-progress" id="cloud-status" aria-live="polite"></p>
+        <div class="vote-status-lines">
+          <p class="vote-progress" id="cloud-status" aria-live="polite"></p>
+          <p class="vote-progress" id="participant-count" aria-live="polite"></p>
+          <p class="vote-progress" id="slot-warn" role="alert" hidden></p>
+        </div>
       </div>
       <form id="vote-form">
         <div id="vote-sliders"></div>
         <div class="vote-actions">
-          <button type="submit">Guardar voto</button>
+          <button type="submit" id="vote-submit">Guardar voto</button>
           <button type="button" id="vote-export">Exportar votos (CSV)</button>
+          <button type="button" id="vote-refresh">Actualizar resultados</button>
+          <button type="button" id="vote-clear">Borrar mis datos locales</button>
           <span id="vote-status" aria-live="polite"></span>
         </div>
       </form>
@@ -1915,14 +1927,54 @@ function setCloudStatus(text) {
 function refreshAfterVote(message) {
   document.getElementById('vote-status').textContent = message;
   renderVoteProgress();
+  refreshSlotWarn();
   setFeatured(state.featuredId);
   renderCharts();
+}
+
+function setVoteBusy(busy) {
+  const btn = document.getElementById('vote-submit');
+  if (btn) btn.disabled = busy;
+}
+
+// True when the slot already has someone else's votes on the server.
+function slotTakenByOther(uid) {
+  return !!state.server &&
+    Object.prototype.hasOwnProperty.call(state.serverUsers, uid) &&
+    !(state.localVotes[uid] && Object.keys(state.localVotes[uid]).length);
+}
+
+function refreshSlotWarn() {
+  const el = document.getElementById('slot-warn');
+  if (!el || typeof voteUserSel !== 'function') return;
+  const sel = voteUserSel();
+  const uid = sel && sel.value;
+  const name = uid ? serverName(uid) : '';
+  if (uid && slotTakenByOther(uid)) {
+    el.hidden = false;
+    el.textContent = name
+      ? 'Atención: ' + uid + ' ya lo usa ' + name + '. Si no sos vos, elegí otro usuario.'
+      : 'Atención: ' + uid + ' ya tiene votos de otra persona. Si no sos vos, elegí otro usuario.';
+  } else {
+    el.hidden = true;
+    el.textContent = '';
+  }
+}
+
+function refreshParticipantCount() {
+  const el = document.getElementById('participant-count');
+  if (!el) return;
+  if (!state.server) { el.textContent = ''; return; }
+  const n = Object.keys(state.serverUsers).length;
+  el.textContent = n === 1 ? '1 persona votando' : n + ' personas votando';
 }
 
 function applyServerData(data) {
   state.server = data.totals;
   state.serverUsers = data.users || {};
   refreshUserLabels();
+  refreshSlotWarn();
+  refreshParticipantCount();
   // The cloud name follows its owner across devices: show it in the name
   // field unless this browser typed a different one.
   const uid = voteUserSel() && voteUserSel().value;
@@ -1960,21 +2012,27 @@ async function sendVoteToServer(uid, pid, name, scores) {
 function syncVoteToCloud(uid, pid, p) {
   const scores = {};
   PARAMS.forEach((par) => { scores[par.key] = Number(state.localVotes[uid][pid][par.key]); });
+  setVoteBusy(true);
   sendVoteToServer(uid, pid, state.localNames[uid] || '', scores).then((data) => {
     applyServerData(data);
     delete state.pending[uid + '|' + pid];
     setCloudStatus('Nube: conectado · voto sincronizado');
+    setVoteBusy(false);
     refreshAfterVote('Voto guardado y sincronizado: ' + label(p));
   }).catch(() => {
     state.pending[uid + '|' + pid] = true;
     setCloudStatus('Nube: sin conexión · voto pendiente');
+    setVoteBusy(false);
     refreshAfterVote('Voto guardado localmente (sin conexión): ' + label(p));
   });
 }
 
-function initCloud() {
-  if (!cloudEnabled()) return;
-  setCloudStatus('Nube: conectando…');
+function refreshCloud() {
+  if (!cloudEnabled()) {
+    setCloudStatus('Nube: no configurada · modo local');
+    return;
+  }
+  setCloudStatus('Nube: actualizando…');
   fetchServerData().then((data) => {
     applyServerData(data);
     setCloudStatus('Nube: conectado (votos de todos)');
@@ -1983,6 +2041,31 @@ function initCloud() {
   }).catch(() => {
     setCloudStatus('Nube: sin conexión · modo local');
   });
+}
+
+function initCloud() {
+  refreshCloud();
+}
+
+function clearLocalData() {
+  if (!window.confirm('¿Borrar tus votos, nombres y usuario guardados en este navegador? Los votos ya sincronizados en la nube no se borran.')) return;
+  try {
+    localStorage.removeItem(STORAGE_VOTES);
+    localStorage.removeItem(STORAGE_NAMES);
+    localStorage.removeItem(STORAGE_USER);
+  } catch (e) { /* storage blocked */ }
+  state.localVotes = {};
+  state.localNames = {};
+  state.pending = {};
+  voteUserSel().selectedIndex = 0;
+  voteNameInput().value = serverName(voteUserSel().value) || '';
+  prefillVoteForm();
+  renderVoteProgress();
+  refreshUserLabels();
+  refreshSlotWarn();
+  setFeatured(state.featuredId);
+  renderCharts();
+  document.getElementById('vote-status').textContent = 'Datos locales borrados (la nube no se tocó)';
 }
 
 // ==== VOTES ====
@@ -2164,12 +2247,15 @@ function initVotes() {
   renderVoteProgress();
   document.getElementById('vote-form').addEventListener('submit', onVoteSubmit);
   document.getElementById('vote-export').addEventListener('click', exportVotesCsv);
+  document.getElementById('vote-refresh').addEventListener('click', refreshCloud);
+  document.getElementById('vote-clear').addEventListener('click', clearLocalData);
   voteUserSel().addEventListener('change', () => {
     try { localStorage.setItem(STORAGE_USER, voteUserSel().value); } catch (e) { /* storage blocked */ }
     const uid = voteUserSel().value;
     voteNameInput().value = state.localNames[uid] || serverName(uid) || '';
     prefillVoteForm();
     renderVoteProgress();
+    refreshSlotWarn();
   });
   voteNameInput().addEventListener('change', () => {
     syncNameFromInput();

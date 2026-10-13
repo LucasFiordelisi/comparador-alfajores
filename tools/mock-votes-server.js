@@ -25,7 +25,8 @@ function computeTotals(rows) {
 function computeUsers(rows) {
   const users = {};
   rows.forEach((row) => {
-    if (row.usuarioId && row.usuarioNombre) users[row.usuarioId] = row.usuarioNombre;
+    // Uids go in even without a name (slot-taken warnings, participant count).
+    if (row.usuarioId) users[row.usuarioId] = row.usuarioNombre || '';
   });
   return users;
 }

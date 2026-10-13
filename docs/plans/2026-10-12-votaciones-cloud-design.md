@@ -29,6 +29,11 @@ Google Apps Script como endpoint gratuito detrás de un Google Sheet.
   El desplegable muestra "Nombre (usuarioN)" para quien ya votó; el nombre
   propio tipeado tiene prioridad y sigue al dueño entre dispositivos. Los
   promedios nunca exponen filas individuales.
+- **v1.1**: botón "Borrar mis datos locales" (solo `localStorage`, la nube no
+  se toca); aviso de slot ocupado por otra persona; botón "Actualizar
+  resultados" (re-fetch sin recargar); contador "N personas votando"; el botón
+  Guardar se deshabilita mientras sincroniza. El mapa `users` incluye uids sin
+  nombre para el aviso y el conteo (se muestran como "usuarioN" pelado).
 - Sin contraseña ni API key en el HTML: solo la URL del web app y un token
   anti-spam no secreto (filtra robots; cualquiera puede leerlo en el código).
 

@@ -43,7 +43,9 @@ function data_() {
     var nm = String(row[2] || '');
     var pid = String(row[3]);
     // El upsert sobrescribe la fila, asi que la ultima aparicion tiene el nombre actual.
-    if (uid && nm) users[uid] = nm;
+    // Se guarda el uid aunque no tenga nombre: sirve para avisar slots ocupados
+    // y contar participantes (el nombre vacio se muestra como "usuarioN" pelado).
+    if (uid) users[uid] = nm;
     if (!pid) continue;
     if (!totals[pid]) totals[pid] = {};
     for (var i = 0; i < PARAMS.length; i++) {

@@ -82,6 +82,8 @@ async function main() {
   const serverUser5 = await page.evaluate(() => (state.serverUsers && state.serverUsers.usuario5) || '');
   await vote(page, 'usuario6', gid, all(2));
   const afterSecond = await kpi(page, gid);
+  // Own slot (voted from this browser) must not warn.
+  const slotWarnOwn = await page.evaluate(() => document.getElementById('slot-warn').hidden);
   await vote(page, 'usuario5', gid, all(10)); // upsert: replaces usuario5's 8s
   const afterRevote = await kpi(page, gid);
 
@@ -109,17 +111,43 @@ async function main() {
   });
   await fresh.select('#vote-user', 'usuario5');
   const dirNameInput = await fresh.evaluate(() => document.getElementById('vote-name').value);
+  // Slot taken by someone else must warn with their name.
+  const slotWarnFresh = await fresh.evaluate(() => ({
+    hidden: document.getElementById('slot-warn').hidden,
+    text: document.getElementById('slot-warn').textContent,
+  }));
+  const participantCount = await fresh.evaluate(() => document.getElementById('participant-count').textContent);
+  // Refresh button re-fetches without reload.
+  await fresh.click('#vote-refresh');
+  await fresh.waitForFunction(() => /conectado/.test(document.getElementById('cloud-status').textContent), { timeout: 5000 });
   await freshBrowser.close();
+
+  // Clear local data on the main page (which holds votes + names): the cloud must be untouched.
+  page.on('dialog', async (d) => { await d.accept(); });
+  await page.click('#vote-clear');
+  await page.waitForFunction(() => /borrados/.test(document.getElementById('vote-status').textContent), { timeout: 5000 });
+  const afterClear = await page.evaluate(() => ({
+    progress: document.getElementById('vote-progress').textContent,
+    votesGone: !localStorage.getItem('alfajor-stats-votes'),
+    namesGone: !localStorage.getItem('alfajor-stats-names'),
+  }));
+  const afterClearKpi = await kpi(page, gid);
 
   const ok =
     afterFirst.score === '8.0' && afterFirst.firstCount === '1 voto' &&
     serverUser5 === 'Maria Cloud' &&
     afterSecond.score === '5.0' && afterSecond.firstCount === '2 votos' &&
+    slotWarnOwn === true &&
     afterRevote.score === '6.0' && afterRevote.firstCount === '2 votos' &&
     afterReload.score === '6.0' && afterReload.firstCount === '2 votos' &&
-    dirOption === 'Maria Cloud (usuario5)' && dirNameInput === 'Maria Cloud';
+    dirOption === 'Maria Cloud (usuario5)' && dirNameInput === 'Maria Cloud' &&
+    slotWarnFresh.hidden === false && slotWarnFresh.text.includes('Maria Cloud') &&
+    participantCount === '2 personas votando' &&
+    afterClear.progress === '0 de 10 alfajores votados' &&
+    afterClear.votesGone === true && afterClear.namesGone === true &&
+    afterClearKpi.score === '6.0' && afterClearKpi.firstCount === '2 votos';
 
-  const report = { afterFirst, serverUser5, afterSecond, afterRevote, afterReload, dirOption, dirNameInput, ok, errors };
+  const report = { afterFirst, serverUser5, afterSecond, slotWarnOwn, afterRevote, afterReload, dirOption, dirNameInput, slotWarnFresh, participantCount, afterClear, afterClearKpi, ok, errors };
   console.log(JSON.stringify(report, null, 2));
 
   await browser.close();
