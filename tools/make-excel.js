@@ -23,16 +23,7 @@ const PARAMS = [
 
 // [marca, modelo, color, scores base (solo para generar los votos)]
 const ALFAJORES = [
-  ['Havanna', 'Clásico de Chocolate', '#6b4423', [7, 9, 9, 9, 7, 6]],
-  ['Cachafaz', 'Oreo', '#232526', [7, 7, 7, 8, 7, 9]],
-  ['Guaymallén', 'Dorado', '#d4a017', [10, 7, 5, 6, 6, 4]],
-  ['Jorgito', 'Grandes', '#2b6cb0', [9, 8, 6, 6, 9, 5]],
-  ['Fantoche', 'Tradicional', '#e8590c', [8, 8, 7, 7, 7, 7]],
-  ['Terrabusi', 'Massini', '#2980b9', [7, 8, 9, 8, 7, 7]],
-  ['Águila', 'Con Crema', '#a93226', [8, 9, 6, 7, 8, 5]],
-  ['Suchard', 'Clásico', '#7d3c98', [6, 7, 9, 7, 6, 8]],
-  ['Rasta', 'Tradicional', '#27ae60', [8, 7, 7, 7, 8, 8]],
-  ['Blanco y Negro', 'Tradicional', '#e0e0e0', [9, 7, 6, 7, 7, 6]],
+  ['Terrabusi', 'Clásico', '#2980b9', [7, 8, 9, 8, 7, 7]],
 ];
 
 // Deterministic PRNG so regenerating the Excel keeps the same votes.

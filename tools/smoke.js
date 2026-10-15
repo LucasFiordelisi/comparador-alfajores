@@ -48,9 +48,12 @@ async function main() {
   const frame2 = await stage.screenshot();
   checks.rotationVisible = !frame1.equals(frame2);
 
-  // Voting flow: usuario1 rates Havanna priceQuality=10 -> KPI must update live
+  // Voting flow: usuario1 rates the first product priceQuality=10 -> KPI must update live
   checks.voteFormUsers = await page.evaluate(() => document.getElementById('vote-user').options.length);
   checks.voteFormAlfajores = await page.evaluate(() => document.getElementById('vote-alfajor').options.length);
+  const firstId = await page.evaluate(() => PRODUCTS[0].id);
+  const firstBrand = await page.evaluate(() => PRODUCTS[0].brand);
+  const productCount = await page.evaluate(() => PRODUCTS.length);
   const beforeParam = await page.$eval('#kpi-params .pval', (el) => el.textContent);
   await page.select('#vote-user', 'usuario1');
   await page.evaluate(() => {
@@ -66,7 +69,11 @@ async function main() {
     try { const v = JSON.parse(localStorage.getItem('alfajor-stats-votes')); return !!(v && v.usuario1); } catch (e) { return false; }
   });
   checks.voteProgress = await page.evaluate(() => document.getElementById('vote-progress').textContent);
-  checks.voteAutoAdvanced = await page.evaluate(() => document.getElementById('vote-alfajor').value !== 'havanna-clasico-de-chocolate');
+  checks.voteAutoAdvanced = await page.evaluate((args) => {
+    const cur = document.getElementById('vote-alfajor').value;
+    // Several products: must jump to an unvoted one. Single product: nowhere to jump, must stay.
+    return args.count > 1 ? cur !== args.firstId : cur === args.firstId;
+  }, { count: productCount, firstId });
 
   // Display name: type it, check dropdown label + localStorage
   await page.type('#vote-name', 'Maria Test');
@@ -95,8 +102,8 @@ async function main() {
     const lines = csv.split(/\r?\n/).filter((l) => l.length > 0);
     checks.csvLines = lines.length;
     checks.csvHeaderOk = lines[0].replace(/^﻿/, '').startsWith('Marca,Atributo,usuario1');
-    const first = lines.find((l) => l.startsWith('Havanna,Relación calidad/precio'));
-    checks.csvHasHavanna = !!first;
+    const first = lines.find((l) => l.startsWith(firstBrand + ',Relación calidad/precio'));
+    checks.csvHasBrand = !!first;
     checks.csvVoteApplied = !!first && first.split(',')[2] === '10'; // usuario1's vote we just saved
   }
   const namesFile = path.join(dlPath, 'nombres-usuarios.csv');
@@ -107,14 +114,20 @@ async function main() {
   }
   fs.rmSync(dlPath, { recursive: true, force: true });
 
-  // Interaction: pick another featured alfajor
-  await page.select('#featured-select', await page.evaluate(() => document.getElementById('featured-select').options[8].value));
-  await new Promise((r) => setTimeout(r, 300));
-  const afterSelect = await page.evaluate(() => document.getElementById('kpi-score').textContent + ' | ' + document.getElementById('kpi-brand').textContent);
-  const logoSrc2 = await page.evaluate(() => document.getElementById('kpi-logo').src || '');
-  const logoChanged = logoSrc2 !== checks.kpiLogoSrc;
+  // Interaction: pick another featured alfajor (if there is more than one)
+  let afterSelect;
+  let logoChanged = true;
+  if (productCount > 1) {
+    await page.select('#featured-select', await page.evaluate(() => { const o = document.getElementById('featured-select').options; return o[o.length - 1].value; }));
+    await new Promise((r) => setTimeout(r, 300));
+    afterSelect = await page.evaluate(() => document.getElementById('kpi-score').textContent + ' | ' + document.getElementById('kpi-brand').textContent);
+    const logoSrc2 = await page.evaluate(() => document.getElementById('kpi-logo').src || '');
+    logoChanged = logoSrc2 !== checks.kpiLogoSrc;
+    logoSrc2.length && (checks.kpiLogoSrc2 = logoSrc2.slice(0, 60) + '...');
+  } else {
+    afterSelect = await page.evaluate(() => document.getElementById('kpi-score').textContent + ' | ' + document.getElementById('kpi-brand').textContent);
+  }
   checks.kpiLogoSrc = checks.kpiLogoSrc.slice(0, 60) + '...';
-  logoSrc2.length && (checks.kpiLogoSrc2 = logoSrc2.slice(0, 60) + '...');
 
   // Interaction: deselect all -> empty state
   await page.click('#btn-none');
@@ -132,9 +145,9 @@ async function main() {
   console.log(JSON.stringify({ checks, afterSelect, logoChanged, emptyShown, chartsBack, errors }, null, 2));
   if (errors.length) process.exit(1);
   if (!checks.rotationVisible || !checks.kpiLogoVisible || !logoChanged) process.exit(1);
-  if (checks.voteFormUsers !== 15 || checks.voteFormAlfajores !== 10) process.exit(1);
+  if (checks.voteFormUsers !== 15 || checks.voteFormAlfajores !== productCount) process.exit(1);
   if (!checks.voteChangedKpi || !checks.voteSaved || !checks.voteAutoAdvanced) process.exit(1);
-  if (!checks.csvExported || checks.csvLines !== 61 || !checks.csvHeaderOk || !checks.csvVoteApplied) process.exit(1);
+  if (!checks.csvExported || checks.csvLines !== productCount * 6 + 1 || !checks.csvHeaderOk || !checks.csvVoteApplied) process.exit(1);
   if (!checks.nameInDropdown || !checks.nameSaved) process.exit(1);
   if (!checks.namesCsvExported || !checks.namesCsvHasUser) process.exit(1);
 }

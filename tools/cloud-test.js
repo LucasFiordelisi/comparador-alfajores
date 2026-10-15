@@ -17,6 +17,16 @@ function build(endpoint) {
   if (r.status !== 0) throw new Error('build failed');
 }
 
+function buildLocal() {
+  const r = spawnSync(process.execPath, [path.join(__dirname, 'build.js'), '--local'], { stdio: 'inherit' });
+  if (r.status !== 0) throw new Error('local build failed');
+}
+
+function rebuild() {
+  const r = spawnSync(process.execPath, [path.join(__dirname, 'build.js')], { stdio: 'inherit' });
+  if (r.status !== 0) throw new Error('build failed');
+}
+
 async function setSliders(page, values) {
   await page.evaluate((vals) => {
     Object.keys(vals).forEach((key) => {
@@ -48,6 +58,8 @@ async function kpi(page, pid) {
 
 async function main() {
   const { default: puppeteer } = await import('puppeteer-core');
+  // Preserve any pre-existing (real) cloud config: tests must never hit production.
+  const savedConfig = fs.existsSync(CLOUD_CONFIG) ? fs.readFileSync(CLOUD_CONFIG, 'utf8') : null;
   const server = await startServer(8791);
   build(server.url);
 
@@ -66,11 +78,8 @@ async function main() {
   await page.waitForFunction(() => /conectado/.test(document.getElementById('cloud-status').textContent), { timeout: 5000 });
 
   const all = (v) => ({ priceQuality: v, dulceDeLeche: v, chocolate: v, tapas: v, contundencia: v, originalidad: v });
-  const gid = await page.evaluate(() => {
-    const p = PRODUCTS.find((x) => x.brand === 'Guaymallén');
-    return p && p.id;
-  });
-  if (!gid) throw new Error('Guaymallen product not found');
+  const gid = await page.evaluate(() => PRODUCTS[0].id);
+  if (!gid) throw new Error('No products found');
 
   // usuario5 registers a name so the cloud user directory can be tested.
   await page.select('#vote-user', 'usuario5');
@@ -143,7 +152,7 @@ async function main() {
     dirOption === 'Maria Cloud (usuario5)' && dirNameInput === 'Maria Cloud' &&
     slotWarnFresh.hidden === false && slotWarnFresh.text.includes('Maria Cloud') &&
     participantCount === '2 personas votando' &&
-    afterClear.progress === '0 de 10 alfajores votados' &&
+    /^0 de \d+ alfajores votados$/.test(afterClear.progress) &&
     afterClear.votesGone === true && afterClear.namesGone === true &&
     afterClearKpi.score === '6.0' && afterClearKpi.firstCount === '2 votos';
 
@@ -153,9 +162,16 @@ async function main() {
   await browser.close();
   await server.close();
 
-  // Leave the repo in local-only mode and re-verify the classic smoke test.
-  build(null);
+  // Leave the repo as it was: restore the saved config (or none) and rebuild,
+  // then run the classic smoke test in local-only mode (never production).
+  if (savedConfig != null) fs.writeFileSync(CLOUD_CONFIG, savedConfig);
+  else if (fs.existsSync(CLOUD_CONFIG)) fs.unlinkSync(CLOUD_CONFIG);
+  buildLocal();
   const smoke = spawnSync(process.execPath, [path.join(__dirname, 'smoke.js')], { stdio: 'inherit' });
+  if (savedConfig != null) {
+    fs.writeFileSync(CLOUD_CONFIG, savedConfig);
+    rebuild();
+  }
   if (!ok || errors.length || smoke.status !== 0) process.exit(1);
   console.log('cloud-test OK');
 }

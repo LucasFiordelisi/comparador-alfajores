@@ -41,12 +41,13 @@ async function main() {
   await new Promise((r) => setTimeout(r, 2000));
   const after = await page.$eval('#kpi-params .pval', (el) => el.textContent);
   const progress = await page.evaluate(() => document.getElementById('vote-progress').textContent);
-  const persisted = await page.evaluate(() => {
+  const firstId = await page.evaluate(() => PRODUCTS[0].id);
+  const persisted = await page.evaluate((fid) => {
     try {
       const v = JSON.parse(localStorage.getItem('alfajor-stats-votes'));
-      return !!(v && v.usuario1 && v.usuario1['havanna-clasico-de-chocolate'] && v.usuario1['havanna-clasico-de-chocolate'].priceQuality === 10);
+      return !!(v && v.usuario1 && v.usuario1[fid] && v.usuario1[fid].priceQuality === 10);
     } catch (e) { return false; }
-  });
+  }, firstId);
   await browser.close();
   fs.rmSync(PROFILE, { recursive: true, force: true });
 

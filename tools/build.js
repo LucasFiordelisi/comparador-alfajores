@@ -119,9 +119,11 @@ function main() {
   let html = fs.readFileSync(path.join(__dirname, 'index.template.html'), 'utf8');
 
   // Optional cloud config (tools/cloud-config.json, git-ignored). No file => local-only mode.
+  // --local forces local-only mode even when the file exists (for tests: never hit production).
+  const forceLocal = process.argv.includes('--local');
   let cloud = { endpoint: '', token: 'alfajor-stats-2026' };
   const cloudPath = path.join(__dirname, 'cloud-config.json');
-  if (fs.existsSync(cloudPath)) {
+  if (!forceLocal && fs.existsSync(cloudPath)) {
     cloud = Object.assign(cloud, JSON.parse(fs.readFileSync(cloudPath, 'utf8')));
   }
 

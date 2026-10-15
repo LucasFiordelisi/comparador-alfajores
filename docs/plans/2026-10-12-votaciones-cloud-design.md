@@ -62,3 +62,7 @@ Google Apps Script como endpoint gratuito detrás de un Google Sheet.
 - `tools/mock-votes-server.js`: server Node con la misma API para probar el
   flujo completo sin Google (`tools/cloud-test.js`).
 - Smoke local (endpoint vacío) debe seguir en verde: sin red no cambia nada.
+- Política: los tests JAMÁS apuntan a producción. `smoke.js` corre sobre un
+  build `--local` (`node build.js --local` ignora `cloud-config.json`);
+  `cloud-test.js` usa el mock, preserva/restaura la config real y deja el
+  `index.html` final reconstruido con ella.
