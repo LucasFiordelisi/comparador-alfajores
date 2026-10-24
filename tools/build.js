@@ -127,7 +127,38 @@ function main() {
     cloud = Object.assign(cloud, JSON.parse(fs.readFileSync(cloudPath, 'utf8')));
   }
 
-  const dataJson = JSON.stringify(products, null, 2);
+  const seedPath = path.join(__dirname, 'candidates-seed.json');
+  let seedCandidates = [];
+  if (fs.existsSync(seedPath)) {
+    try { seedCandidates = JSON.parse(fs.readFileSync(seedPath, 'utf8')) || []; } catch (e) { seedCandidates = []; }
+  }
+  const allProducts = products.slice();
+  const baseIds = new Set(allProducts.map((p) => p.id));
+  seedCandidates.forEach((c) => {
+    const marca = String(c.marca || '').trim();
+    const modelo = String(c.modelo || '').trim();
+    const slugId = slug(marca + '-' + modelo);
+    const id = String(c.alfajorId || slugId).trim().toLowerCase();
+    if (!marca || !modelo || baseIds.has(id)) return;
+    const color = /^#[0-9a-fA-F]{6}$/.test(c.color) ? c.color : '#7a5230';
+    const scores = { priceQuality: 0, dulceDeLeche: 0, chocolate: 0, tapas: 0, contundencia: 0, originalidad: 0 };
+    const votes = { priceQuality: 0, dulceDeLeche: 0, chocolate: 0, tapas: 0, contundencia: 0, originalidad: 0 };
+    const raw = {};
+    Object.keys(scores).forEach((k) => { raw[k] = [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null]; });
+    allProducts.push({
+      id: id,
+      brand: marca,
+      name: modelo,
+      color: color,
+      scores: scores,
+      votes: votes,
+      raw: raw,
+      logo: c.logoDataUrl || null,
+      extra: true
+    });
+    baseIds.add(id);
+  });
+  const dataJson = JSON.stringify(allProducts, null, 2);
   const replacements = {
     '__LIB_THREE__': inlineLib('three.min.js'),
     '__LIB_CHART__': inlineLib('chart.umd.min.js'),
@@ -146,9 +177,9 @@ function main() {
   const out = path.join(ROOT, 'index.html');
   fs.writeFileSync(out, html);
   console.log('index.html generado:', out);
-  console.log('Alfajores embebidos:', products.length, '| tamaño:', (fs.statSync(out).size / 1024).toFixed(0) + ' KB');
+  console.log('Alfajores embebidos:', allProducts.length, '| tamaño:', (fs.statSync(out).size / 1024).toFixed(0) + ' KB');
   console.log('Votaciones nube:', cloud.endpoint ? cloud.endpoint : '(modo local: sin endpoint)');
-  products.forEach((p) => {
+  allProducts.forEach((p) => {
     const avg = Object.values(p.scores).reduce((a, b) => a + b, 0) / 6;
     console.log(' - ' + p.brand + ' ' + p.name + ': ' + avg.toFixed(2) + ' (' + p.votes.priceQuality + ' votos/atributo)');
   });

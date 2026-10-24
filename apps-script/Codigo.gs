@@ -28,6 +28,16 @@ function sheet_() {
   return sh;
 }
 
+function candidatesSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(CANDIDATES_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(CANDIDATES_SHEET);
+    sh.appendRow(CANDIDATE_HEADERS);
+  }
+  return sh;
+}
+
 // Agrega la hoja completa: { totals: {alfajorId: {param: {sum, count}}},
 //                             users: {usuarioId: nombre} }.
 function data_() {
@@ -62,6 +72,31 @@ function data_() {
   return data;
 }
 
+function candidatesData_() {
+  var cached = CacheService.getScriptCache().get(CACHE_CANDIDATES_KEY);
+  if (cached) return JSON.parse(cached);
+
+  var sh = candidatesSheet_();
+  var values = sh.getDataRange().getValues();
+  var candidates = [];
+  for (var r = 1; r < values.length; r++) {
+    var row = values[r];
+    var alfajorId = String(row[2] || '').trim();
+    if (!alfajorId) continue;
+    candidates.push({
+      alfajorId: alfajorId,
+      marca: String(row[3] || '').trim(),
+      modelo: String(row[4] || '').trim(),
+      color: String(row[5] || '').trim(),
+      logoDataUrl: String(row[6] || '').trim(),
+      createdBy: String(row[1] || '').trim()
+    });
+  }
+  var data = { candidates: candidates };
+  CacheService.getScriptCache().put(CACHE_CANDIDATES_KEY, JSON.stringify(data), CACHE_SECONDS);
+  return data;
+}
+
 function json_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
@@ -69,7 +104,8 @@ function json_(obj) {
 
 function doGet() {
   var d = data_();
-  return json_({ ok: true, totals: d.totals, users: d.users });
+  var c = candidatesData_();
+  return json_({ ok: true, totals: d.totals, users: d.users, candidates: c.candidates || [] });
 }
 
 function doPost(e) {
@@ -88,10 +124,48 @@ function doPost(e) {
     }
     if (body.token !== TOKEN) return json_({ ok: false, error: 'token' });
 
-    var uid = String(body.usuarioId || '');
-    var pid = String(body.alfajorId || '');
+    // Agregar candidato (solo usuario1)
+    if (body.action === 'addCandidate') {
+      var uid = String(body.usuarioId || '');
+      if (uid !== 'usuario1') return json_({ ok: false, error: 'unauthorized' });
+      var pid = String(body.alfajorId || '').trim().toLowerCase();
+      var marca = String(body.marca || '').trim().slice(0, 60);
+      var modelo = String(body.modelo || '').trim().slice(0, 60);
+      var color = String(body.color || '').trim().slice(0, 7);
+      var logoDataUrl = String(body.logoDataUrl || '');
+      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(pid) || !marca || !modelo) {
+        return json_({ ok: false, error: 'payload' });
+      }
+      // Limitar tamaño de imagen para evitar inflar demasiado la hoja
+      if (logoDataUrl.length > 180000) return json_({ ok: false, error: 'image-too-large' });
+
+      var shc = candidatesSheet_();
+      var cvals = shc.getDataRange().getValues();
+      for (var cr = 1; cr < cvals.length; cr++) {
+        if (String(cvals[cr][2] || '').trim().toLowerCase() === pid) {
+          // Permitir reemplazar imagen/color si ya existe (actualizar)
+          shc.getRange(cr + 1, 5, 1, 3).setValues([[color, logoDataUrl, cvals[cr][6]]]); // mantener logo si vacío? reemplazamos con lo enviado
+          // Reemplazo completo de los campos editables
+          shc.getRange(cr + 1, 6, 1, 2).setValues([[color, logoDataUrl]]);
+          CacheService.getScriptCache().remove(CACHE_CANDIDATES_KEY);
+          CacheService.getScriptCache().remove(CACHE_KEY);
+          var d2 = data_();
+          var c2 = candidatesData_();
+          return json_({ ok: true, totals: d2.totals, users: d2.users, candidates: c2.candidates || [], updated: true });
+        }
+      }
+      shc.appendRow([new Date(), uid, pid, marca, modelo, color, logoDataUrl]);
+      CacheService.getScriptCache().remove(CACHE_CANDIDATES_KEY);
+      CacheService.getScriptCache().remove(CACHE_KEY);
+      var d3 = data_();
+      var c3 = candidatesData_();
+      return json_({ ok: true, totals: d3.totals, users: d3.users, candidates: c3.candidates || [], created: true });
+    }
+
+    var uidv = String(body.usuarioId || '');
+    var pidv = String(body.alfajorId || '');
     var name = String(body.usuarioNombre || '').slice(0, 30);
-    if (!/^usuario\d+$/.test(uid) || !pid) return json_({ ok: false, error: 'payload' });
+    if (!/^usuario\d+$/.test(uidv) || !pidv) return json_({ ok: false, error: 'payload' });
 
     var scores = {};
     for (var i = 0; i < PARAMS.length; i++) {
@@ -104,18 +178,19 @@ function doPost(e) {
     var values = sh.getDataRange().getValues();
     var targetRow = -1;
     for (var r = 1; r < values.length; r++) {
-      if (String(values[r][1]) === uid && String(values[r][3]) === pid) {
+      if (String(values[r][1]) === uidv && String(values[r][3]) === pidv) {
         targetRow = r + 1; // getRange es 1-based e incluye el encabezado
         break;
       }
     }
-    var row = [new Date(), uid, name, pid].concat(PARAMS.map(function (k) { return scores[k]; }));
+    var row = [new Date(), uidv, name, pidv].concat(PARAMS.map(function (k) { return scores[k]; }));
     if (targetRow > 0) sh.getRange(targetRow, 1, 1, HEADERS.length).setValues([row]);
     else sh.appendRow(row);
 
     CacheService.getScriptCache().remove(CACHE_KEY);
-    var d = data_();
-    return json_({ ok: true, totals: d.totals, users: d.users });
+    var dv = data_();
+    var cv = candidatesData_();
+    return json_({ ok: true, totals: dv.totals, users: dv.users, candidates: cv.candidates || [] });
   } finally {
     lock.releaseLock();
   }

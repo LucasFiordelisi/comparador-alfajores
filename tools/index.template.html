@@ -214,6 +214,46 @@ footer { margin: 1.5rem 0 0.5rem; color: var(--text-muted); font-size: 0.8rem; t
       </div>
     </section>
 
+    <section class="card" id="candidate-admin" aria-label="Agregar candidato" hidden>
+      <h2>Agregar candidato (solo usuario1)</h2>
+      <p style="margin:0 0 0.8rem; color: var(--text-muted); font-size:0.9rem;">Sumá un alfajor competidor nuevo. Aparecerá para votar al instante. Podés reemplazar la imagen si hay un error.</p>
+      <div class="vote-setup" style="grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));">
+        <div class="field">
+          <label for="cand-marca">Marca</label>
+          <input type="text" id="cand-marca" maxlength="60" placeholder="ej. Chocoleza">
+        </div>
+        <div class="field">
+          <label for="cand-modelo">Modelo / Nombre</label>
+          <input type="text" id="cand-modelo" maxlength="60" placeholder="ej. Negro DdL">
+        </div>
+        <div class="field">
+          <label for="cand-color">Color tapas (opcional)</label>
+          <input type="text" id="cand-color" maxlength="7" placeholder="#7a5230">
+        </div>
+        <div class="field">
+          <label for="cand-id">alfajorId generado</label>
+          <input type="text" id="cand-id" maxlength="80" readonly placeholder="se genera automáticamente">
+        </div>
+      </div>
+      <div class="vote-setup" style="grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); align-items:start;">
+        <div class="field">
+          <label for="cand-logo">Imagen del alfajor / etiqueta (opcional)</label>
+          <input type="file" id="cand-logo" accept="image/*">
+          <small style="color: var(--text-muted);">Se guarda como dataURL. Máx ~150KB recomendado.</small>
+        </div>
+        <div class="field">
+          <label>Vista previa</label>
+          <img id="cand-preview" alt="" style="width:4.5rem;height:4.5rem;object-fit:contain;border-radius:0.6rem;border:1px solid var(--border);background:#fbf7f0;display:none;">
+        </div>
+      </div>
+      <div class="vote-actions">
+        <button type="button" id="cand-generate">Generar alfajorId</button>
+        <button type="button" id="cand-add">Agregar / Reemplazar candidato</button>
+        <button type="button" id="cand-clear">Limpiar imagen</button>
+        <span id="cand-status" aria-live="polite"></span>
+      </div>
+    </section>
+
     <section class="card vote" aria-label="Tu votación">
       <h2>Tu votación</h2>
       <div class="vote-setup">
@@ -284,10 +324,13 @@ __LIB_CHART__
 const PRODUCTS = __DATA__;
 
 // Cloud voting (Google Apps Script web app). Empty endpoint => local-only mode.
-const CONFIG = {
-  votesEndpoint: __VOTES_ENDPOINT__,
-  antiSpamToken: __ANTI_SPAM_TOKEN__
-};
+  const CONFIG = {
+    votesEndpoint: __VOTES_ENDPOINT__,
+    antiSpamToken: __ANTI_SPAM_TOKEN__
+  };
+
+  // Candidatos agregados desde la app (solo usuario1)
+  const STORAGE_EXTRA_CANDIDATES = 'alfajor-stats-extra-candidates';
 
 const PARAMS = [
   { key: 'priceQuality',  label: 'Relación calidad/precio',   short: 'Calidad/precio' },
@@ -298,17 +341,19 @@ const PARAMS = [
   { key: 'originalidad',  label: 'Originalidad',              short: 'Originalidad' }
 ];
 
-const state = {
-  selected: new Set(PRODUCTS.map((p) => p.id)),
-  featuredId: PRODUCTS.length ? PRODUCTS[0].id : null,
-  charts: { ranking: null, radar: null, bars: null },
-  alfajor: null,
-  localVotes: {}, // { usuarioN: { productId: { attrKey: value } } }
-  localNames: {}, // { usuarioN: "Nombre visible" }
-  server: null, // { alfajorId: { attrKey: { sum, count } } } or null = no cloud data
-  serverUsers: {}, // { usuarioN: "Nombre" } from everyone who voted (cloud directory)
-  pending: {} // { "usuarioN|productId": true } = local vote the server has not confirmed yet
-};
+  const state = {
+    selected: new Set(PRODUCTS.map((p) => p.id)),
+    featuredId: PRODUCTS.length ? PRODUCTS[0].id : null,
+    charts: { ranking: null, radar: null, bars: null },
+    alfajor: null,
+    localVotes: {}, // { usuarioN: { productId: { attrKey: value } } }
+    localNames: {}, // { usuarioN: "Nombre visible" }
+    server: null, // { alfajorId: { attrKey: { sum, count } } } or null = no cloud data
+    serverUsers: {}, // { usuarioN: "Nombre" } from everyone who voted (cloud directory)
+    pending: {}, // { "usuarioN|productId": true } = local vote the server has not confirmed yet
+    extraCandidates: [], // candidatos agregados desde la app
+    allProducts: [] // array completo (embebidos + extra)
+  };
 
 // ==== LOGIC ====
 const STORAGE_VOTES = 'alfajor-stats-votes';
@@ -399,60 +444,120 @@ function withAlpha(hex, alpha) {
   return 'rgba(' + r + ', ' + g + ', ' + b + ', ' + alpha + ')';
 }
 
-function selectedProducts() {
-  return PRODUCTS.filter((p) => state.selected.has(p.id));
-}
+  function selectedProducts() {
+    rebuildProducts();
+    return state.allProducts.filter((p) => state.selected.has(p.id));
+  }
 
-function featuredProduct() {
-  return PRODUCTS.find((p) => p.id === state.featuredId) || null;
-}
+  function featuredProduct() {
+    rebuildProducts();
+    return state.allProducts.find((p) => p.id === state.featuredId) || null;
+  }
 
-function label(p) {
-  return p.brand + ' · ' + p.name;
-}
+  function label(p) {
+    return p.brand + ' · ' + p.name;
+  }
+
+  function slug(s) {
+    return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  }
+
+  function loadExtraCandidates() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_EXTRA_CANDIDATES)) || []; } catch (e) { return []; }
+  }
+
+  function persistExtraCandidates() {
+    try { localStorage.setItem(STORAGE_EXTRA_CANDIDATES, JSON.stringify(state.extraCandidates)); } catch (e) { /* storage blocked */ }
+  }
+
+  function candidateToProduct(c) {
+    const brand = String(c.marca || c.brand || '').trim();
+    const name = String(c.modelo || c.name || '').trim();
+    const id = String(c.alfajorId || c.id || slug(brand + '-' + name)).trim().toLowerCase();
+    const color = /^#[0-9a-fA-F]{6}$/.test(c.color) ? c.color : '#7a5230';
+    const scores = { priceQuality: 0, dulceDeLeche: 0, chocolate: 0, tapas: 0, contundencia: 0, originalidad: 0 };
+    const votes = { priceQuality: 0, dulceDeLeche: 0, chocolate: 0, tapas: 0, contundencia: 0, originalidad: 0 };
+    const raw = {};
+    Object.keys(scores).forEach((k) => { raw[k] = [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null]; });
+    return {
+      id: id,
+      brand: brand,
+      name: name,
+      color: color,
+      scores: scores,
+      votes: votes,
+      raw: raw,
+      logo: c.logoDataUrl || c.logo || null,
+      extra: true
+    };
+  }
+
+  function rebuildProducts() {
+    const base = PRODUCTS.slice();
+    const extra = [];
+    state.extraCandidates.forEach((c) => {
+      const p = candidateToProduct(c);
+      if (p.brand && p.name) extra.push(p);
+    });
+    state.allProducts = base.concat(extra);
+    // Ensure selected/featured still valid
+    if (!state.allProducts.find((p) => p.id === state.featuredId)) {
+      state.featuredId = state.allProducts.length ? state.allProducts[0].id : null;
+    }
+    const validSel = new Set();
+    state.allProducts.forEach((p) => { if (state.selected.has(p.id)) validSel.add(p.id); });
+    // If nothing selected, keep previous or select all new
+    if (validSel.size === 0) {
+      state.allProducts.forEach((p) => validSel.add(p.id));
+    }
+    state.selected = validSel;
+  }
 
 // ==== UI ====
 function cssVar(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
-function renderToggles() {
-  const box = document.getElementById('brand-toggles');
-  box.textContent = '';
-  PRODUCTS.forEach((p) => {
-    const chip = document.createElement('label');
-    chip.className = 'chip';
+  function renderToggles() {
+    rebuildProducts();
+    const box = document.getElementById('brand-toggles');
+    box.textContent = '';
+    state.allProducts.forEach((p) => {
+      const chip = document.createElement('label');
+      chip.className = 'chip';
 
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.checked = state.selected.has(p.id);
-    input.addEventListener('change', () => {
-      if (input.checked) state.selected.add(p.id);
-      else state.selected.delete(p.id);
-      renderCharts();
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.checked = state.selected.has(p.id);
+      input.addEventListener('change', () => {
+        if (input.checked) state.selected.add(p.id);
+        else state.selected.delete(p.id);
+        renderCharts();
+      });
+
+      const dot = document.createElement('span');
+      dot.className = 'dot';
+      dot.style.background = p.color;
+
+      chip.append(input, dot, document.createTextNode(label(p)));
+      box.appendChild(chip);
     });
+  }
 
-    const dot = document.createElement('span');
-    dot.className = 'dot';
-    dot.style.background = p.color;
-
-    chip.append(input, dot, document.createTextNode(label(p)));
-    box.appendChild(chip);
-  });
-}
-
-function renderSelect() {
-  const sel = document.getElementById('featured-select');
-  sel.textContent = '';
-  PRODUCTS.forEach((p) => {
-    const opt = document.createElement('option');
-    opt.value = p.id;
-    opt.textContent = label(p);
-    opt.selected = p.id === state.featuredId;
-    sel.appendChild(opt);
-  });
-  sel.addEventListener('change', () => setFeatured(sel.value));
-}
+  function renderSelect() {
+    rebuildProducts();
+    const sel = document.getElementById('featured-select');
+    sel.textContent = '';
+    state.allProducts.forEach((p) => {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = label(p);
+      opt.selected = p.id === state.featuredId;
+      sel.appendChild(opt);
+    });
+    sel.onchange = () => setFeatured(sel.value);
+  }
 
 function setFeatured(id) {
   state.featuredId = id;
@@ -620,10 +725,35 @@ function renderCharts() {
   });
 }
 
-// ==== CLOUD ====
-function cloudEnabled() {
-  return !!CONFIG.votesEndpoint;
-}
+  // ==== CLOUD ====
+  function cloudEnabled() {
+    return !!CONFIG.votesEndpoint;
+  }
+
+  function mergeCloudCandidates(list) {
+    if (!Array.isArray(list)) return;
+    const existing = new Map(state.extraCandidates.map((c) => [String(c.alfajorId).toLowerCase(), c]));
+    list.forEach((c) => {
+      const id = String(c.alfajorId || '').trim().toLowerCase();
+      if (!id) return;
+      existing.set(id, {
+        alfajorId: id,
+        marca: String(c.marca || '').trim(),
+        modelo: String(c.modelo || '').trim(),
+        color: String(c.color || '').trim(),
+        logoDataUrl: String(c.logoDataUrl || '').trim(),
+        createdBy: String(c.createdBy || '').trim()
+      });
+    });
+    state.extraCandidates = Array.from(existing.values());
+    persistExtraCandidates();
+    rebuildProducts();
+    renderToggles();
+    renderSelect();
+    rebuildVoteAlfajorSelect();
+    if (state.alfajor && featuredProduct()) state.alfajor.setProduct(featuredProduct());
+    renderCharts();
+  }
 
 function setCloudStatus(text) {
   document.getElementById('cloud-status').textContent = text;
@@ -674,26 +804,27 @@ function refreshParticipantCount() {
   el.textContent = n === 1 ? '1 persona votando' : n + ' personas votando';
 }
 
-function applyServerData(data) {
-  state.server = data.totals;
-  state.serverUsers = data.users || {};
-  refreshUserLabels();
-  refreshSlotWarn();
-  refreshParticipantCount();
-  // The cloud name follows its owner across devices: show it in the name
-  // field unless this browser typed a different one.
-  const uid = voteUserSel() && voteUserSel().value;
-  if (uid && voteNameInput() && !state.localNames[uid]) {
-    voteNameInput().value = serverName(uid);
+  function applyServerData(data) {
+    state.server = data.totals;
+    state.serverUsers = data.users || {};
+    if (Array.isArray(data.candidates)) mergeCloudCandidates(data.candidates);
+    refreshUserLabels();
+    refreshSlotWarn();
+    refreshParticipantCount();
+    // The cloud name follows its owner across devices: show it in the name
+    // field unless this browser typed a different one.
+    const uid = voteUserSel() && voteUserSel().value;
+    if (uid && voteNameInput() && !state.localNames[uid]) {
+      voteNameInput().value = serverName(uid);
+    }
   }
-}
 
-async function fetchServerData() {
-  const res = await fetch(CONFIG.votesEndpoint + '?_=' + Date.now(), { redirect: 'follow' });
-  const data = await res.json();
-  if (!data || !data.ok || !data.totals) throw new Error('bad response');
-  return data;
-}
+  async function fetchServerData() {
+    const res = await fetch(CONFIG.votesEndpoint + '?_=' + Date.now(), { redirect: 'follow' });
+    const data = await res.json();
+    if (!data || !data.ok || !data.totals) throw new Error('bad response');
+    return data;
+  }
 
 async function sendVoteToServer(uid, pid, name, scores) {
   // text/plain avoids the CORS preflight, which Apps Script does not handle.
@@ -778,10 +909,10 @@ function voteUserSel() { return document.getElementById('vote-user'); }
 function voteAlfajorSel() { return document.getElementById('vote-alfajor'); }
 function voteNameInput() { return document.getElementById('vote-name'); }
 
-function userCount() {
-  const p = PRODUCTS[0];
-  return p && p.raw && p.raw.priceQuality ? p.raw.priceQuality.length : 15;
-}
+  function userCount() {
+    const p = (state.allProducts && state.allProducts[0]) || PRODUCTS[0];
+    return p && p.raw && p.raw.priceQuality ? p.raw.priceQuality.length : 15;
+  }
 
 function serverName(uid) {
   return (state.serverUsers && state.serverUsers[uid]) || '';
@@ -796,28 +927,43 @@ function refreshUserLabels() {
   });
 }
 
-function buildVoteControls() {
-  const userSel = voteUserSel();
-  for (let i = 1; i <= userCount(); i++) {
-    const opt = document.createElement('option');
-    opt.value = 'usuario' + i;
-    opt.textContent = 'usuario' + i;
-    userSel.appendChild(opt);
+  function rebuildVoteAlfajorSelect() {
+    rebuildProducts();
+    const alfSel = voteAlfajorSel();
+    if (!alfSel) return;
+    const current = alfSel.value;
+    alfSel.textContent = '';
+    state.allProducts.forEach((p) => {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = label(p);
+      alfSel.appendChild(opt);
+    });
+    if (current && Array.from(alfSel.options).some((o) => o.value === current)) {
+      alfSel.value = current;
+    } else if (state.allProducts.length) {
+      alfSel.value = state.allProducts[0].id;
+    }
   }
-  try {
-    const saved = localStorage.getItem(STORAGE_USER);
-    if (saved) userSel.value = saved;
-  } catch (e) { /* storage blocked */ }
-  refreshUserLabels();
-  voteNameInput().value = state.localNames[userSel.value] || serverName(userSel.value) || '';
 
-  const alfSel = voteAlfajorSel();
-  PRODUCTS.forEach((p) => {
-    const opt = document.createElement('option');
-    opt.value = p.id;
-    opt.textContent = label(p);
-    alfSel.appendChild(opt);
-  });
+  function buildVoteControls() {
+    rebuildProducts();
+    const userSel = voteUserSel();
+    userSel.textContent = '';
+    for (let i = 1; i <= userCount(); i++) {
+      const opt = document.createElement('option');
+      opt.value = 'usuario' + i;
+      opt.textContent = 'usuario' + i;
+      userSel.appendChild(opt);
+    }
+    try {
+      const saved = localStorage.getItem(STORAGE_USER);
+      if (saved && Array.from(userSel.options).some((o) => o.value === saved)) userSel.value = saved;
+    } catch (e) { /* storage blocked */ }
+    refreshUserLabels();
+    voteNameInput().value = state.localNames[userSel.value] || serverName(userSel.value) || '';
+
+    rebuildVoteAlfajorSelect();
 
   const sliders = document.getElementById('vote-sliders');
   PARAMS.forEach((par) => {
@@ -862,12 +1008,13 @@ function prefillVoteForm() {
   });
 }
 
-function renderVoteProgress() {
-  const uid = voteUserSel().value;
-  const mine = state.localVotes[uid] || {};
-  const done = PRODUCTS.filter((p) => mine[p.id]).length;
-  document.getElementById('vote-progress').textContent = done + ' de ' + PRODUCTS.length + ' alfajores votados';
-}
+  function renderVoteProgress() {
+    rebuildProducts();
+    const uid = voteUserSel().value;
+    const mine = state.localVotes[uid] || {};
+    const done = state.allProducts.filter((p) => mine[p.id]).length;
+    document.getElementById('vote-progress').textContent = done + ' de ' + state.allProducts.length + ' alfajores votados';
+  }
 
 function syncNameFromInput() {
   const uid = voteUserSel().value;
@@ -878,32 +1025,33 @@ function syncNameFromInput() {
   refreshUserLabels();
 }
 
-function onVoteSubmit(ev) {
-  ev.preventDefault();
-  syncNameFromInput(); // keep the name that goes to the server in sync with the field
-  const uid = voteUserSel().value;
-  const pid = voteAlfajorSel().value;
-  const p = PRODUCTS.find((x) => x.id === pid);
-  if (!p) return;
+  function onVoteSubmit(ev) {
+    ev.preventDefault();
+    syncNameFromInput(); // keep the name that goes to the server in sync with the field
+    rebuildProducts();
+    const uid = voteUserSel().value;
+    const pid = voteAlfajorSel().value;
+    const p = state.allProducts.find((x) => x.id === pid);
+    if (!p) return;
 
-  if (!state.localVotes[uid]) state.localVotes[uid] = {};
-  if (!state.localVotes[uid][pid]) state.localVotes[uid][pid] = {};
-  PARAMS.forEach((par) => {
-    state.localVotes[uid][pid][par.key] = Number(document.getElementById('vote-' + par.key).value);
-  });
-  persistLocalVotes();
+    if (!state.localVotes[uid]) state.localVotes[uid] = {};
+    if (!state.localVotes[uid][pid]) state.localVotes[uid][pid] = {};
+    PARAMS.forEach((par) => {
+      state.localVotes[uid][pid][par.key] = Number(document.getElementById('vote-' + par.key).value);
+    });
+    persistLocalVotes();
 
-  if (cloudEnabled()) {
-    refreshAfterVote('Voto guardado: ' + label(p));
-    syncVoteToCloud(uid, pid, p);
-  } else {
-    refreshAfterVote('Voto guardado: ' + label(p));
+    if (cloudEnabled()) {
+      refreshAfterVote('Voto guardado: ' + label(p));
+      syncVoteToCloud(uid, pid, p);
+    } else {
+      refreshAfterVote('Voto guardado: ' + label(p));
+    }
+
+    // friendly flow: jump to the next alfajor this user has not voted yet
+    const next = state.allProducts.find((x) => !state.localVotes[uid][x.id]);
+    if (next) { voteAlfajorSel().value = next.id; prefillVoteForm(); }
   }
-
-  // friendly flow: jump to the next alfajor this user has not voted yet
-  const next = PRODUCTS.find((x) => !state.localVotes[uid][x.id]);
-  if (next) { voteAlfajorSel().value = next.id; prefillVoteForm(); }
-}
 
 function csvEscape(v) {
   const s = String(v);
@@ -921,18 +1069,19 @@ function downloadFile(filename, content, type) {
   URL.revokeObjectURL(a.href);
 }
 
-function exportVotesCsv() {
-  const n = userCount();
-  const header = ['Marca', 'Atributo'].concat(Array.from({ length: n }, (_, i) => 'usuario' + (i + 1)));
-  const lines = [header.join(',')];
-  PRODUCTS.forEach((p) => {
-    PARAMS.forEach((par) => {
-      const row = [p.brand, par.label].concat(effectiveMatrix(p, par.key).map((v) => (v == null ? '' : v)));
-      lines.push(row.join(','));
+  function exportVotesCsv() {
+    rebuildProducts();
+    const n = userCount();
+    const header = ['Marca', 'Atributo'].concat(Array.from({ length: n }, (_, i) => 'usuario' + (i + 1)));
+    const lines = [header.join(',')];
+    state.allProducts.forEach((p) => {
+      PARAMS.forEach((par) => {
+        const row = [p.brand, par.label].concat(effectiveMatrix(p, par.key).map((v) => (v == null ? '' : v)));
+        lines.push(row.join(','));
+      });
     });
-  });
-  const csv = '\uFEFF' + lines.join('\r\n'); // BOM so Excel reads accents
-  downloadFile('votaciones-actualizadas.csv', csv, 'text/csv;charset=utf-8');
+    const csv = '\uFEFF' + lines.join('\r\n'); // BOM so Excel reads accents
+    downloadFile('votaciones-actualizadas.csv', csv, 'text/csv;charset=utf-8');
 
   const named = Object.keys(state.localNames).filter((uid) => state.localNames[uid] && /^usuario\d+$/i.test(uid));
   if (named.length) {
@@ -944,31 +1093,35 @@ function exportVotesCsv() {
   }
 }
 
-function initVotes() {
-  state.localVotes = loadLocalVotes();
-  state.localNames = loadLocalNames();
-  buildVoteControls();
-  prefillVoteForm();
-  renderVoteProgress();
-  document.getElementById('vote-form').addEventListener('submit', onVoteSubmit);
-  document.getElementById('vote-export').addEventListener('click', exportVotesCsv);
-  document.getElementById('vote-refresh').addEventListener('click', refreshCloud);
-  document.getElementById('vote-clear').addEventListener('click', clearLocalData);
-  voteUserSel().addEventListener('change', () => {
-    try { localStorage.setItem(STORAGE_USER, voteUserSel().value); } catch (e) { /* storage blocked */ }
-    const uid = voteUserSel().value;
-    voteNameInput().value = state.localNames[uid] || serverName(uid) || '';
+  function initVotes() {
+    state.localVotes = loadLocalVotes();
+    state.localNames = loadLocalNames();
+    state.extraCandidates = loadExtraCandidates();
+    rebuildProducts();
+    buildVoteControls();
     prefillVoteForm();
     renderVoteProgress();
-    refreshSlotWarn();
-  });
-  voteNameInput().addEventListener('change', () => {
-    syncNameFromInput();
-    const name = state.localNames[voteUserSel().value] || '';
-    document.getElementById('vote-status').textContent = name ? 'Nombre guardado: ' + name : 'Nombre quitado';
-  });
-  voteAlfajorSel().addEventListener('change', prefillVoteForm);
-}
+    document.getElementById('vote-form').addEventListener('submit', onVoteSubmit);
+    document.getElementById('vote-export').addEventListener('click', exportVotesCsv);
+    document.getElementById('vote-refresh').addEventListener('click', refreshCloud);
+    document.getElementById('vote-clear').addEventListener('click', clearLocalData);
+    voteUserSel().addEventListener('change', () => {
+      try { localStorage.setItem(STORAGE_USER, voteUserSel().value); } catch (e) { /* storage blocked */ }
+      const uid = voteUserSel().value;
+      voteNameInput().value = state.localNames[uid] || serverName(uid) || '';
+      prefillVoteForm();
+      renderVoteProgress();
+      refreshSlotWarn();
+      initCandidateAdmin();
+    });
+    voteNameInput().addEventListener('change', () => {
+      syncNameFromInput();
+      const name = state.localNames[voteUserSel().value] || '';
+      document.getElementById('vote-status').textContent = name ? 'Nombre guardado: ' + name : 'Nombre quitado';
+    });
+    voteAlfajorSel().addEventListener('change', prefillVoteForm);
+    initCandidateAdmin();
+  }
 
 // ==== 3D ====
 function roundedSquareShape(size, radius) {
@@ -1109,29 +1262,172 @@ function initAlfajor() {
   };
 }
 
-// ==== INIT ====
-function init() {
-  renderToggles();
-  renderSelect();
-  initVotes(); // must run before the first render: loads persisted local votes
-  setFeatured(state.featuredId);
-  state.alfajor = initAlfajor();
-  const fp = featuredProduct();
-  if (state.alfajor && fp) state.alfajor.setProduct(fp);
-  renderCharts();
-  initCloud(); // async: switches KPI/charts to server totals when reachable
+  // ==== CANDIDATES ADMIN ====
+  function isAdminUser() {
+    const sel = voteUserSel();
+    return sel && sel.value === 'usuario1';
+  }
 
-  document.getElementById('btn-all').addEventListener('click', () => {
-    state.selected = new Set(PRODUCTS.map((p) => p.id));
-    document.querySelectorAll('#brand-toggles input').forEach((i) => { i.checked = true; });
+  function updateCandidateId() {
+    const marca = document.getElementById('cand-marca').value.trim();
+    const modelo = document.getElementById('cand-modelo').value.trim();
+    const id = slug(marca + '-' + modelo);
+    document.getElementById('cand-id').value = id;
+    return id;
+  }
+
+  function initCandidateAdmin() {
+    const panel = document.getElementById('candidate-admin');
+    if (!panel) return;
+    panel.hidden = !isAdminUser();
+    if (panel.hidden) return;
+
+    const marca = document.getElementById('cand-marca');
+    const modelo = document.getElementById('cand-modelo');
+    const color = document.getElementById('cand-color');
+    const cid = document.getElementById('cand-id');
+    const file = document.getElementById('cand-logo');
+    const prev = document.getElementById('cand-preview');
+    const gen = document.getElementById('cand-generate');
+    const add = document.getElementById('cand-add');
+    const clear = document.getElementById('cand-clear');
+    const status = document.getElementById('cand-status');
+
+    if (marca._candBound) return;
+    marca._candBound = true;
+
+    marca.addEventListener('input', updateCandidateId);
+    modelo.addEventListener('input', updateCandidateId);
+
+    gen.addEventListener('click', () => {
+      const id = updateCandidateId();
+      status.textContent = id ? 'alfajorId: ' + id : 'Completá marca y modelo';
+    });
+
+    let logoDataUrl = '';
+    file.addEventListener('change', (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (!f) return;
+      if (f.size > 150000) {
+        status.textContent = 'Imagen >150KB. Recomendado achicarla.';
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        logoDataUrl = String(reader.result || '');
+        if (logoDataUrl) {
+          prev.src = logoDataUrl;
+          prev.style.display = 'block';
+          status.textContent = 'Imagen cargada (' + Math.round(logoDataUrl.length / 1024) + 'KB aprox)';
+        }
+      };
+      reader.readAsDataURL(f);
+    });
+
+    clear.addEventListener('click', () => {
+      logoDataUrl = '';
+      if (file) file.value = '';
+      if (prev) { prev.src = ''; prev.style.display = 'none'; }
+      status.textContent = 'Imagen limpiada';
+    });
+
+    add.addEventListener('click', async () => {
+      const m = marca.value.trim();
+      const mod = modelo.value.trim();
+      const c = color.value.trim();
+      const id = updateCandidateId() || slug(m + '-' + mod);
+      if (!m || !mod) { status.textContent = 'Falta marca o modelo'; return; }
+      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id)) { status.textContent = 'alfajorId inválido'; return; }
+      if (c && !/^#[0-9a-fA-F]{6}$/.test(c)) { status.textContent = 'Color debe ser #RRGGBB o dejar vacío'; return; }
+      if (logoDataUrl.length > 180000) { status.textContent = 'Imagen muy grande para guardar en la hoja'; return; }
+
+      const cand = { alfajorId: id, marca: m, modelo: mod, color: c, logoDataUrl: logoDataUrl, createdBy: 'usuario1' };
+      // Guardar local primero para ver reflejado ya
+      const existing = state.extraCandidates.filter((x) => String(x.alfajorId).toLowerCase() !== id);
+      state.extraCandidates = existing.concat([cand]);
+      persistExtraCandidates();
+      rebuildProducts();
+      renderToggles();
+      renderSelect();
+      rebuildVoteAlfajorSelect();
+      // Seleccionar para votación/exhibición
+      state.featuredId = id;
+      state.selected.add(id);
+      if (state.alfajor && featuredProduct()) state.alfajor.setProduct(featuredProduct());
+      setFeatured(id);
+      renderCharts();
+      prefillVoteForm();
+      renderVoteProgress();
+      status.textContent = 'Guardado localmente. Enviando a la nube...';
+
+      if (!cloudEnabled()) {
+        status.textContent = 'Candidato agregado (solo local). Configurá el endpoint para que todos lo vean.';
+        return;
+      }
+
+      try {
+        const res = await fetch(CONFIG.votesEndpoint, {
+          method: 'POST',
+          redirect: 'follow',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            token: CONFIG.antiSpamToken,
+            usuarioId: 'usuario1',
+            action: 'addCandidate',
+            alfajorId: id,
+            marca: m,
+            modelo: mod,
+            color: c,
+            logoDataUrl: logoDataUrl
+          })
+        });
+        const data = await res.json();
+        if (data && data.ok && Array.isArray(data.candidates)) {
+          mergeCloudCandidates(data.candidates);
+          status.textContent = data.updated ? 'Candidato actualizado (imagen/reemplazo). Ya aparece para votar.' : 'Candidato agregado. Ya aparece para votar.';
+        } else {
+          status.textContent = 'Agregado localmente, pero no se pudo sincronizar con la nube.';
+        }
+      } catch (e) {
+        status.textContent = 'Agregado localmente, pero sin conexión con la nube.';
+      }
+      // Limpiar campos para agregar el siguiente
+      // modelo.value = '';
+      // marca.value = '';
+      // color.value = '';
+      // cid.value = '';
+      // logoDataUrl = '';
+      // if (file) file.value = '';
+      // if (prev) { prev.src = ''; prev.style.display = 'none'; }
+    });
+  }
+
+  // ==== INIT ====
+  function init() {
+    state.extraCandidates = loadExtraCandidates();
+    rebuildProducts();
+    renderToggles();
+    renderSelect();
+    rebuildVoteAlfajorSelect();
+    initVotes(); // must run before the first render: loads persisted local votes
+    setFeatured(state.featuredId);
+    state.alfajor = initAlfajor();
+    const fp = featuredProduct();
+    if (state.alfajor && fp) state.alfajor.setProduct(fp);
     renderCharts();
-  });
-  document.getElementById('btn-none').addEventListener('click', () => {
-    state.selected = new Set();
-    document.querySelectorAll('#brand-toggles input').forEach((i) => { i.checked = false; });
-    renderCharts();
-  });
-}
+    initCloud(); // async: switches KPI/charts to server totals when reachable
+
+    document.getElementById('btn-all').addEventListener('click', () => {
+      rebuildProducts();
+      state.selected = new Set(state.allProducts.map((p) => p.id));
+      document.querySelectorAll('#brand-toggles input').forEach((i) => { i.checked = true; });
+      renderCharts();
+    });
+    document.getElementById('btn-none').addEventListener('click', () => {
+      state.selected = new Set();
+      document.querySelectorAll('#brand-toggles input').forEach((i) => { i.checked = false; });
+      renderCharts();
+    });
+  }
 
 init();
 </script>
