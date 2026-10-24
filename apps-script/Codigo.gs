@@ -98,14 +98,29 @@ function candidatesData_() {
 }
 
 function json_(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj))
+  var out = ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
+  return out;
 }
 
 function doGet() {
-  var d = data_();
-  var c = candidatesData_();
-  return json_({ ok: true, totals: d.totals, users: d.users, candidates: c.candidates || [] });
+  try {
+    var d = {};
+    try { d = data_(); } catch (e1) { d = { totals: {}, users: {} }; }
+    var cands = [];
+    try {
+      var c = candidatesData_();
+      if (c && Array.isArray(c.candidates)) cands = c.candidates;
+    } catch (e2) { cands = []; }
+    return json_({ ok: true, totals: d.totals || {}, users: d.users || {}, candidates: cands });
+  } catch (e) {
+    try {
+      return ContentService.createTextOutput(JSON.stringify({ ok: true, totals: {}, users: {}, candidates: [] }))
+        .setMimeType(ContentService.MimeType.JSON);
+    } catch (e3) {
+      return ContentService.createTextOutput('{"ok":true,"totals":{},"users":{},"candidates":[]}').setMimeType(ContentService.MimeType.JSON);
+    }
+  }
 }
 
 function doPost(e) {
