@@ -3,8 +3,18 @@ const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
 
+const { execFileSync } = require('child_process');
+
 const EDGE = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
-const URL = pathToFileURL(path.join(__dirname, '..', 'index.html')).href;
+// Isolated local-only build: never write to the production cloud endpoint.
+const LOCAL_HTML = path.join(__dirname, 'index.persist.html');
+execFileSync(process.execPath, [path.join(__dirname, 'build.js'), '--local', '--out', LOCAL_HTML], { stdio: 'ignore' });
+const LOCAL_SRC = fs.readFileSync(LOCAL_HTML, 'utf8');
+if (!/votesEndpoint:\s*""/.test(LOCAL_SRC)) {
+  console.error('persist-test: build con endpoint real; abortando.');
+  process.exit(1);
+}
+const URL = pathToFileURL(LOCAL_HTML).href;
 const PROFILE = path.join(__dirname, 'profile-test');
 
 async function open() {
@@ -55,4 +65,4 @@ async function main() {
   process.exit(persisted && before !== after ? 0 : 1);
 }
 
-main().catch((err) => { console.error(err); process.exit(1); });
+main().catch((err) => { console.error(err); process.exit(1); }).finally(() => { try { fs.rmSync(LOCAL_HTML, { force: true }); } catch (e) {} });

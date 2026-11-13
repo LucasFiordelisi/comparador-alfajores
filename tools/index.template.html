@@ -331,6 +331,7 @@ const PRODUCTS = __DATA__;
 
   // Candidatos agregados desde la app (solo usuario1)
   const STORAGE_EXTRA_CANDIDATES = 'alfajor-stats-extra-candidates';
+  const MAX_USERS = 20;
 
 const PARAMS = [
   { key: 'priceQuality',  label: 'Relación calidad/precio',   short: 'Calidad/precio' },
@@ -479,7 +480,7 @@ function withAlpha(hex, alpha) {
     const scores = { priceQuality: 0, dulceDeLeche: 0, chocolate: 0, tapas: 0, contundencia: 0, originalidad: 0 };
     const votes = { priceQuality: 0, dulceDeLeche: 0, chocolate: 0, tapas: 0, contundencia: 0, originalidad: 0 };
     const raw = {};
-    Object.keys(scores).forEach((k) => { raw[k] = [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null]; });
+    Object.keys(scores).forEach((k) => { raw[k] = new Array(MAX_USERS).fill(null); });
     return {
       id: id,
       brand: brand,
@@ -911,7 +912,8 @@ function voteNameInput() { return document.getElementById('vote-name'); }
 
   function userCount() {
     const p = (state.allProducts && state.allProducts[0]) || PRODUCTS[0];
-    return p && p.raw && p.raw.priceQuality ? p.raw.priceQuality.length : 15;
+    const n = p && p.raw && p.raw.priceQuality ? p.raw.priceQuality.length : 0;
+    return Math.max(n, MAX_USERS);
   }
 
 function serverName(uid) {

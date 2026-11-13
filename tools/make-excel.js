@@ -1,12 +1,12 @@
 // Generates datos/alfajores-ejemplo.xlsx:
 //   - Hoja "Alfajores": metadata (marca, modelo, color)
-//   - Hoja "Votaciones": 60 filas (10 alfajores x 6 atributos) x usuario1..15
+//   - Hoja "Votaciones": una fila por alfajor x atributo, columnas usuario1..N
 // Votes are deterministic (seeded) and centered on the base scores so the
 // demo shows realistic averages without hand-typing 900 cells.
 const ExcelJS = require('exceljs');
 const path = require('path');
 
-const USERS = 15;
+const USERS = 20;
 
 // false = empty vote cells (the app starts at 0 votes until people vote);
 // true = deterministic demo votes centered on the base scores below.

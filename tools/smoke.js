@@ -1,9 +1,18 @@
-// Headless smoke test: loads ../index.html and checks console + core interactions.
+// Headless smoke test: builds an isolated local-only copy and checks console +
+// core interactions. It NEVER touches the production cloud endpoint.
 const path = require('path');
 const fs = require('fs');
+const { execFileSync } = require('child_process');
 
 const EDGE = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
-const URL = 'file:///' + path.join(__dirname, '..', 'index.html').replace(/\\/g, '/');
+const SMOKE_HTML = path.join(__dirname, 'index.smoke.html');
+execFileSync(process.execPath, [path.join(__dirname, 'build.js'), '--local', '--out', SMOKE_HTML], { stdio: 'ignore' });
+const SMOKE_SRC = fs.readFileSync(SMOKE_HTML, 'utf8');
+if (!/votesEndpoint:\s*""/.test(SMOKE_SRC)) {
+  console.error('smoke: el build de prueba tiene endpoint real; abortando para no escribir en produccion.');
+  process.exit(1);
+}
+const URL = 'file:///' + SMOKE_HTML.replace(/\\/g, '/');
 
 async function main() {
   const { default: puppeteer } = await import('puppeteer-core');
@@ -53,7 +62,7 @@ async function main() {
   checks.voteFormAlfajores = await page.evaluate(() => document.getElementById('vote-alfajor').options.length);
   const firstId = await page.evaluate(() => PRODUCTS[0].id);
   const firstBrand = await page.evaluate(() => PRODUCTS[0].brand);
-  const productCount = await page.evaluate(() => PRODUCTS.length);
+  const productCount = await page.evaluate(() => state.allProducts.length);
   const beforeParam = await page.$eval('#kpi-params .pval', (el) => el.textContent);
   await page.select('#vote-user', 'usuario1');
   await page.evaluate(() => {
@@ -122,7 +131,9 @@ async function main() {
     await new Promise((r) => setTimeout(r, 300));
     afterSelect = await page.evaluate(() => document.getElementById('kpi-score').textContent + ' | ' + document.getElementById('kpi-brand').textContent);
     const logoSrc2 = await page.evaluate(() => document.getElementById('kpi-logo').src || '');
-    logoChanged = logoSrc2 !== checks.kpiLogoSrc;
+    const logoHidden2 = await page.evaluate(() => document.getElementById('kpi-logo').hidden);
+    // A product without logo hides the sticker: that is a valid visual change too.
+    logoChanged = logoSrc2 !== checks.kpiLogoSrc || logoHidden2;
     logoSrc2.length && (checks.kpiLogoSrc2 = logoSrc2.slice(0, 60) + '...');
   } else {
     afterSelect = await page.evaluate(() => document.getElementById('kpi-score').textContent + ' | ' + document.getElementById('kpi-brand').textContent);
@@ -141,11 +152,12 @@ async function main() {
 
   await page.screenshot({ path: path.join(__dirname, 'smoke-screenshot.png') });
   await browser.close();
+  fs.rmSync(SMOKE_HTML, { force: true });
 
   console.log(JSON.stringify({ checks, afterSelect, logoChanged, emptyShown, chartsBack, errors }, null, 2));
   if (errors.length) process.exit(1);
   if (!checks.rotationVisible || !checks.kpiLogoVisible || !logoChanged) process.exit(1);
-  if (checks.voteFormUsers !== 15 || checks.voteFormAlfajores !== productCount) process.exit(1);
+  if (checks.voteFormUsers !== 20 || checks.voteFormAlfajores !== productCount) process.exit(1);
   if (!checks.voteChangedKpi || !checks.voteSaved || !checks.voteAutoAdvanced) process.exit(1);
   if (!checks.csvExported || checks.csvLines !== productCount * 6 + 1 || !checks.csvHeaderOk || !checks.csvVoteApplied) process.exit(1);
   if (!checks.nameInDropdown || !checks.nameSaved) process.exit(1);
